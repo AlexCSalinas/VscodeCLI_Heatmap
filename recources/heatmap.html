@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Terminal Command Heatmap</title>
+  <style>
+    body {
+      font-family: var(--vscode-font-family);
+      background-color: var(--vscode-editor-background);
+      color: var(--vscode-editor-foreground);
+      padding: 20px;
+    }
+    
+    h1 {
+      text-align: center;
+      margin-bottom: 30px;
+      color: var(--vscode-titleBar-activeForeground);
+    }
+    
+    .container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    
+    .heatmap {
+      display: grid;
+      grid-template-columns: repeat(53, 15px);
+      grid-gap: 3px;
+      margin-bottom: 20px;
+    }
+    
+    .day {
+      width: 15px;
+      height: 15px;
+      border-radius: 2px;
+      cursor: pointer;
+      transition: transform 0.1s ease;
+    }
+    
+    .day:hover {
+      transform: scale(1.2);
+    }
+    
+    .legend {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      margin-top: 10px;
+    }
+    
+    .legend-item {
+      width: 15px;
+      height: 15px;
+      border-radius: 2px;
+    }
+    
+    .legend-label {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      margin-right: 15px;
+      font-size: 12px;
+    }
+    
+    .month-labels {
+      display: grid;
+      grid-template-columns: repeat(53, 15px);
+      grid-gap: 3px;
+      margin-bottom: 5px;
+      font-size: 12px;
+      color: var(--vscode-descriptionForeground);
+    }
+    
+    .tooltip {
+      position: absolute;
+      background-color: var(--vscode-editorWidget-background);
+      border: 1px solid var(--vscode-widget-border);
+      border-radius: 6px;
+      padding: 10px;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      font-size: 12px;
+      box-shadow: var(--vscode-widget-shadow);
+      z-index: 10;
+    }
+    
+    .stat-box {
+      background-color: var(--vscode-editorWidget-background);
+      border: 1px solid var(--vscode-widget-border);
+      border-radius: 6px;
+      padding: 15px;
+      margin-top: 20px;
+      width: 100%;
+      max-width: 600px;
+    }
+    
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 15px;
+      margin-top: 10px;
+    }
+    
+    .stat-item {
+      display: flex;
+      flex-direction: column;
+    }
+    
+    .stat-value {
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 5px;
+      color: var(--vscode-textLink-foreground);
+    }
+    
+    .stat-label {
+      font-size: 14px;
+      color: var(--vscode-descriptionForeground);
+    }
+  </style>
+</head>
+<body>
+  <h1>Terminal Command Activity</h1>
+  
+  <div class="container">
+    <div class="month-labels" id="month-labels"></div>
+    <div class="heatmap" id="heatmap"></div>
+    
+    <div class="legend">
+      <div class="legend-label">
+        <span>Less</span>
+      </div>
+      <div class="legend-item" style="background-color: #0e4429;"></div>
+      <div class="legend-item" style="background-color: #006d32;"></div>
+      <div class="legend-item" style="background-color: #26a641;"></div>
+      <div class="legend-item" style="background-color: #39d353;"></div>
+      <div class="legend-label">
+        <span>More</span>
+      </div>
+    </div>
+    
+    <div class="stat-box">
+      <h3>Command Statistics</h3>
+      <div class="stat-grid">
+        <div class="stat-item">
+          <div class="stat-value" id="total-commands">0</div>
+          <div class="stat-label">Total Commands</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="active-days">0</div>
+          <div class="stat-label">Active Days</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="best-day-count">0</div>
+          <div class="stat-label">Most Active Day</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="avg-commands">0</div>
+          <div class="stat-label">Daily Average</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <div class="tooltip" id="tooltip"></div>
+  
+  <script>
+    (function() {
+      // Load data from user's home directory
+      const vscode = acquireVsCodeApi();
+      
+      // Helper functions
+      function formatDate(dateStr) {
+        const date = new Date(dateStr);
+        return date.toLocaleDateString('en-US', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric' 
+        });
+      }
+      
+      function getColorForCount(count) {
+        if (count === 0) return 'var(--vscode-editor-background)';
+        if (count < 5) return '#0e4429';
+        if (count < 10) return '#006d32';
+        if (count < 20) return '#26a641';
+        return '#39d353';
+      }
+      
+      // Function to create the heatmap
+      function renderHeatmap(data) {
+        const heatmapContainer = document.getElementById('heatmap');
+        const tooltipElement = document.getElementById('tooltip');
+        const monthLabelsContainer = document.getElementById('month-labels');
+        
+        // Create a full year of dates for the heatmap
+        const today = new Date();
+        const oneYearAgo = new Date();
+        oneYearAgo.setFullYear(today.getFullYear() - 1);
+        
+        // Create a map of all dates in the year
+        const dateMap = new Map();
+        const monthsSet = new Set();
+        
+        // Start with the first Sunday before or on oneYearAgo
+        const startDate = new Date(oneYearAgo);
+        startDate.setDate(startDate.getDate() - startDate.getDay());
+        
+        // Fill in all dates for the year
+        for (let i = 0; i < 53 * 7; i++) {
+          const currentDate = new Date(startDate);
+          currentDate.setDate(startDate.getDate() + i);
+          
+          if (currentDate > today) break;
+          
+          const dateString = currentDate.toISOString().split('T')[0];
+          dateMap.set(dateString, 0);
+          
+          // Track month changes for labels
+          const monthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
+          if (currentDate.getDay() === 0) { // Only on Sundays
+            monthsSet.add({
+              key: monthKey,
+              date: new Date(currentDate),
+              index: Math.floor(i / 7)
+            });
+          }
+        }
+        
+        // Update with actual data
+        let totalCommands = 0;
+        let bestDay = { date: '', count: 0 };
+        
+        data.forEach(item => {
+          if (dateMap.has(item.date)) {
+            dateMap.set(item.date, item.count);
+            totalCommands += item.count;
+            
+            if (item.count > bestDay.count) {
+              bestDay = { date: item.date, count: item.count };
+            }
+          }
+        });
+        
+        // Create the month labels
+        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        const monthLabels = Array.from(monthsSet);
+        
+        // Clear previous labels
+        monthLabelsContainer.innerHTML = '';
+        
+        // Add spacer for the first cell
+        const spacer = document.createElement('span');
+        spacer.style.gridColumn = '1';
+        monthLabelsContainer.appendChild(spacer);
+        
+        // Add month labels
+        monthLabels.forEach(month => {
+          if (month.date.getDate() <= 7) { // Only show the month name once
+            const label = document.createElement('span');
+            label.textContent = monthNames[month.date.getMonth()];
+            label.style.gridColumn = month.index + 1;
+            monthLabelsContainer.appendChild(label);
+          }
+        });
+        
+        // Clear previous cells
+        heatmapContainer.innerHTML = '';
+        
+        // Create each day cell
+        let activeDays = 0;
+        dateMap.forEach((count, date) => {
+          const dayElement = document.createElement('div');
+          dayElement.className = 'day';
+          dayElement.style.backgroundColor = getColorForCount(count);
+          
+          if (count > 0) activeDays++;
+          
+          // Add tooltip interaction
+          dayElement.addEventListener('mouseover', (e) => {
+            const rect = e.target.getBoundingClientRect();
+            tooltipElement.style.left = `${rect.left + window.scrollX - 80}px`;
+            tooltipElement.style.top = `${rect.top + window.scrollY - 60}px`;
+            tooltipElement.innerHTML = `
+              <div>${formatDate(date)}</div>
+              <div><strong>${count} commands</strong></div>
+            `;
+            tooltipElement.style.opacity = '1';
+          });
+          
+          dayElement.addEventListener('mouseout', () => {
+            tooltipElement.style.opacity = '0';
+          });
+          
+          heatmapContainer.appendChild(dayElement);
+        });
+        
+        // Update statistics
+        document.getElementById('total-commands').textContent = totalCommands;
+        document.getElementById('active-days').textContent = activeDays;
+        document.getElementById('best-day-count').textContent = bestDay.count;
+        document.getElementById('avg-commands').textContent = (activeDays > 0 ? (totalCommands / activeDays).toFixed(1) : '0');
+      }
+      
+      // Load the data
+      async function loadData() {
+        try {
+          const homeDir = await vscode.postMessage({ command: 'getHomeDir' });
+          const dataPath = `${homeDir}/.vscode-terminal-tracker/heatmap-data.json`;
+          
+          // Request data from extension
+          vscode.postMessage({ command: 'loadData', path: dataPath });
+          
+          // Listen for response
+          window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'dataLoaded') {
+              renderHeatmap(message.data);
+            }
+          });
+        } catch (error) {
+          console.error('Error loading data:', error);
+        }
+      }
+      
+      // Initialize on page load
+      document.addEventListener('DOMContentLoaded', loadData);
+    })();
+  </script>
+</body>
+</html>
