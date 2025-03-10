@@ -10,7 +10,9 @@
     "Other"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:terminal-tracker.showHeatmap",
+    "onCommand:terminal-tracker.logCommand"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -18,10 +20,6 @@
       {
         "command": "terminal-tracker.showHeatmap",
         "title": "Terminal Tracker: Show Command Heatmap"
-      },
-      {
-        "command": "terminal-tracker.showStats",
-        "title": "Terminal Tracker: Show Command Statistics"
       },
       {
         "command": "terminal-tracker.logCommand",
