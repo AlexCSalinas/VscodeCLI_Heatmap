@@ -271,7 +271,8 @@ fi`, true);
                         $timestamp = [DateTime]::UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
                         $commandText = $lastCommand.CommandLine
                         $terminalName = "${terminal.name}"
-                        Add-Content -Path $global:TERMINAL_TRACKER_PATH -Value "$timestamp't$terminalName't$commandText"
+                        # Using simple concatenation to avoid tab escaping issues
+                        Add-Content -Path $global:TERMINAL_TRACKER_PATH -Value ($timestamp + "	" + $terminalName + "	" + $commandText)
                     }
                     return "PS $($executionContext.SessionState.Path.CurrentLocation)> "
                 }
