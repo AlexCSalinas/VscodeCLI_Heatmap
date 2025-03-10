@@ -4,9 +4,9 @@ import * as path from 'path';
 import * as os from 'os';
 
 // Configuration
-const LOG_DIR = path.join(os.homedir(), '.vscode-terminal-tracker');
-const LOG_FILE = path.join(LOG_DIR, 'terminal-commands.log');
-const DATA_FILE = path.join(LOG_DIR, 'heatmap-data.json');
+const DATA_DIR = path.join(os.homedir(), '.vscode-terminal-tracker');
+const LOG_FILE = path.join(DATA_DIR, 'terminal-commands.log');
+const DATA_FILE = path.join(DATA_DIR, 'heatmap-data.json');
 const STATUS_BAR_TITLE = '$(terminal) Terminal Tracker';
 
 // Track webview panel
@@ -15,9 +15,9 @@ let currentPanel: vscode.WebviewPanel | undefined = undefined;
 export function activate(context: vscode.ExtensionContext) {
     console.log('Terminal Tracker extension is now active');
     
-    // Create log directory if it doesn't exist
-    if (!fs.existsSync(LOG_DIR)) {
-        fs.mkdirSync(LOG_DIR, { recursive: true });
+    // Create directory if needed
+    if (!fs.existsSync(DATA_DIR)) {
+        fs.mkdirSync(DATA_DIR, { recursive: true });
     }
     
     // Create status bar item
@@ -31,182 +31,132 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
     
-    // Use a more reliable approach to track terminal commands
-    // Track commands executed in the terminal
+    // Register commands - THIS PATTERN WORKS!
     context.subscriptions.push(
-        vscode.window.onDidOpenTerminal(terminal => {
-            trackTerminal(terminal);
+        vscode.commands.registerCommand('terminal-tracker.test', () => {
+            vscode.window.showInformationMessage('Test command works!');
         })
     );
     
-    // Track already open terminals
-    vscode.window.terminals.forEach(terminal => {
-        trackTerminal(terminal);
-    });
-    
-    // Register command to show heatmap
     context.subscriptions.push(
         vscode.commands.registerCommand('terminal-tracker.showHeatmap', () => {
+            console.log("Heatmap command executing");
+            
+            // First generate the data file
             generateHeatmapData();
             
-            // Get the path to the HTML file
-            const heatmapPath = path.join(context.extensionPath, 'resources', 'heatmap.html');
+            // Then display the heatmap
+            showHeatmapWebview(context);
             
-            // Create and show webview panel
-            if (currentPanel) {
-                // If we already have a panel, reveal it
-                currentPanel.reveal(vscode.ViewColumn.One);
-            } else {
-                // Create a new panel
-                currentPanel = vscode.window.createWebviewPanel(
-                    'terminalHeatmap',
-                    'Terminal Usage Heatmap',
-                    vscode.ViewColumn.One,
-                    {
-                        // Enable JavaScript in the webview
-                        enableScripts: true,
-                        // Restrict the webview to only load resources from the extension's directory
-                        localResourceRoots: [vscode.Uri.file(context.extensionPath)]
-                    }
-                );
-                
-                // Handle messages from the webview
-                currentPanel.webview.onDidReceiveMessage(
-                    async (message) => {
-                        switch (message.command) {
-                            case 'getHomeDir':
-                                currentPanel?.webview.postMessage({ 
-                                    command: 'homeDir', 
-                                    path: os.homedir() 
-                                });
-                                break;
-                            case 'loadData':
-                                try {
-                                    // Read data file
-                                    if (fs.existsSync(DATA_FILE)) {
-                                        const dataContent = fs.readFileSync(DATA_FILE, 'utf8');
-                                        const data = JSON.parse(dataContent);
-                                        currentPanel?.webview.postMessage({ 
-                                            command: 'dataLoaded', 
-                                            data: data 
-                                        });
-                                    } else {
-                                        currentPanel?.webview.postMessage({ 
-                                            command: 'dataLoaded', 
-                                            data: [] 
-                                        });
-                                    }
-                                } catch (error) {
-                                    console.error('Error loading data:', error);
-                                }
-                                break;
-                        }
-                    },
-                    undefined,
-                    context.subscriptions
-                );
-                
-                // Reset when the panel is disposed
-                currentPanel.onDidDispose(
-                    () => {
-                        currentPanel = undefined;
-                    },
-                    null,
-                    context.subscriptions
-                );
-            }
-            
-            // Set the HTML content
-            try {
-                if (fs.existsSync(heatmapPath)) {
-                    const htmlContent = fs.readFileSync(heatmapPath, 'utf8');
-                    currentPanel.webview.html = htmlContent;
-                } else {
-                    console.error(`Heatmap HTML file not found at: ${heatmapPath}`);
-                    currentPanel.webview.html = `<html><body><h1>Error: HTML file not found at ${heatmapPath}</h1></body></html>`;
-                    vscode.window.showErrorMessage(`Heatmap HTML file not found at: ${heatmapPath}`);
-                }
-            } catch (error) {
-                console.error('Error loading heatmap HTML:', error);
-                vscode.window.showErrorMessage(`Error loading heatmap: ${error}`);
-            }
-            
-            // Show confirmation message
-            vscode.window.showInformationMessage('Terminal usage heatmap generated and opened!');
+            // Show confirmation
+            vscode.window.showInformationMessage('Heatmap command works!');
         })
     );
     
-    // Register command to show statistics
-    context.subscriptions.push(
-        vscode.commands.registerCommand('terminal-tracker.showStats', () => {
-            showCommandStatistics();
-        })
-    );
-    
-    // Monitor terminal commands through Execution event if available in API
+    // Track terminal commands if the API is available
     if ('onDidExecuteTerminalCommand' in vscode.window) {
         context.subscriptions.push(
             (vscode.window as any).onDidExecuteTerminalCommand((commandLine: string) => {
                 // Log command with timestamp
                 logCommand(commandLine);
-                
-                // Update command count in status bar
-                updateCommandCountDisplay(statusBarItem);
+                updateStatusBar(statusBarItem);
             })
         );
     }
     
-    // Setup command logging through terminal send text events
+    // Fallback tracking for bash/zsh terminals
     context.subscriptions.push(
-        vscode.window.onDidCloseTerminal(terminal => {
-            // Log that the terminal was closed (to help with debugging)
-            console.log(`Terminal closed: ${terminal.name}`);
+        vscode.window.onDidOpenTerminal(terminal => {
+            setupTerminalTracking(terminal);
         })
     );
     
-    // Setup a command to manually log commands (useful for testing and manual logging)
-    context.subscriptions.push(
-        vscode.commands.registerCommand('terminal-tracker.logCommand', async () => {
-            const command = await vscode.window.showInputBox({
-                prompt: 'Enter command to log',
-                placeHolder: 'e.g., git status'
-            });
-            
-            if (command) {
-                logCommand(command);
-                updateCommandCountDisplay(statusBarItem);
-                vscode.window.showInformationMessage(`Command logged: ${command}`);
-            }
-        })
-    );
+    // Track existing terminals too
+    vscode.window.terminals.forEach(terminal => {
+        setupTerminalTracking(terminal);
+    });
+    
+    // Update status bar initially
+    updateStatusBar(statusBarItem);
+    
+    // Process any command files periodically
+    setInterval(() => {
+        processCommandFiles(statusBarItem);
+    }, 5000);
 }
 
-// Track terminal for command execution
-function trackTerminal(terminal: vscode.Terminal) {
-    console.log(`Tracking terminal: ${terminal.name}`);
+// Show the heatmap in a webview
+function showHeatmapWebview(context: vscode.ExtensionContext) {
+    // Get the path to the HTML file
+    const heatmapPath = path.join(context.extensionPath, 'resources', 'heatmap.html');
+    console.log(`Looking for heatmap at: ${heatmapPath}`);
+    console.log(`File exists: ${fs.existsSync(heatmapPath)}`);
     
-    // We can't directly track commands for all terminals, but we'll log when a terminal is used
-    // and add alternative tracking methods
-    
-    // For bash/zsh terminals, we can inject a command to help track command history
-    if (terminal.name.toLowerCase().includes('bash') || 
-        terminal.name.toLowerCase().includes('zsh')) {
-        
-        // Send a command to set up PROMPT_COMMAND for command tracking
-        // This is invisible to the user and logs commands to our tracker
-        terminal.sendText(`
-if [[ -z \${TERMINAL_TRACKER_INIT+x} ]]; then
-    export TERMINAL_TRACKER_INIT=1
-    log_vscode_command() {
-        local cmd=\$(history 1)
-        cmd=\$(echo "\$cmd" | sed 's/^[ ]*[0-9]\\+[ ]*//')
-        if [ ! -z "\$cmd" ]; then
-            echo "\$(date -u +"%Y-%m-%dT%H:%M:%SZ")\\t${terminal.name}\\t\$cmd" >> "${LOG_FILE}"
-        fi
+    // If panel exists, just reveal it
+    if (currentPanel) {
+        currentPanel.reveal(vscode.ViewColumn.One);
+        return;
     }
-    export PROMPT_COMMAND="log_vscode_command;\${PROMPT_COMMAND}"
-    echo "Terminal tracker activated for ${terminal.name}"
-fi`, true);
+    
+    // Create new panel
+    currentPanel = vscode.window.createWebviewPanel(
+        'terminalHeatmap',
+        'Terminal Usage Heatmap',
+        vscode.ViewColumn.One,
+        {
+            enableScripts: true,
+            localResourceRoots: [vscode.Uri.file(context.extensionPath)]
+        }
+    );
+    
+    // Handle messages from the webview
+    currentPanel.webview.onDidReceiveMessage(
+        async (message) => {
+            switch (message.command) {
+                case 'loadData':
+                    try {
+                        if (fs.existsSync(DATA_FILE)) {
+                            const dataContent = fs.readFileSync(DATA_FILE, 'utf8');
+                            const data = JSON.parse(dataContent);
+                            currentPanel?.webview.postMessage({ 
+                                command: 'dataLoaded', 
+                                data: data 
+                            });
+                        } else {
+                            currentPanel?.webview.postMessage({ 
+                                command: 'dataLoaded', 
+                                data: [] 
+                            });
+                        }
+                    } catch (error) {
+                        console.error('Error loading data:', error);
+                    }
+                    break;
+            }
+        }
+    );
+    
+    // Reset when panel is closed
+    currentPanel.onDidDispose(
+        () => {
+            currentPanel = undefined;
+        },
+        null
+    );
+    
+    // Set the HTML content
+    try {
+        if (fs.existsSync(heatmapPath)) {
+            const htmlContent = fs.readFileSync(heatmapPath, 'utf8');
+            currentPanel.webview.html = htmlContent;
+        } else {
+            console.error(`Heatmap HTML file not found at: ${heatmapPath}`);
+            currentPanel.webview.html = `<html><body><h1>Error: HTML file not found at ${heatmapPath}</h1></body></html>`;
+            vscode.window.showErrorMessage(`Heatmap HTML file not found at: ${heatmapPath}`);
+        }
+    } catch (error) {
+        console.error('Error loading heatmap HTML:', error);
+        vscode.window.showErrorMessage(`Error loading heatmap: ${error}`);
     }
 }
 
@@ -264,53 +214,18 @@ function generateHeatmapData() {
         // Write to data file
         fs.writeFileSync(DATA_FILE, JSON.stringify(heatmapData, null, 2));
         
+        console.log(`Generated heatmap data with ${heatmapData.length} days of data`);
+        
     } catch (error) {
         vscode.window.showErrorMessage(`Error generating heatmap data: ${error}`);
     }
 }
 
-// Show command statistics
-function showCommandStatistics() {
+// Update status bar with today's count
+function updateStatusBar(statusBar: vscode.StatusBarItem) {
     try {
         if (!fs.existsSync(LOG_FILE)) {
-            vscode.window.showInformationMessage('No terminal command logs found yet.');
-            return;
-        }
-        
-        const logData = fs.readFileSync(LOG_FILE, 'utf8');
-        const lines = logData.trim().split('\n');
-        
-        // Count total commands
-        const totalCommands = lines.length;
-        
-        // Get unique dates
-        const dates = new Set<string>();
-        lines.forEach(line => {
-            const parts = line.split('\t');
-            if (parts.length >= 1) {
-                const date = parts[0].substring(0, 10);
-                dates.add(date);
-            }
-        });
-        
-        // Display statistics
-        vscode.window.showInformationMessage(
-            `Terminal Command Statistics:\n` +
-            `Total Commands: ${totalCommands}\n` +
-            `Active Days: ${dates.size}\n` +
-            `Average Commands per Day: ${(totalCommands / Math.max(1, dates.size)).toFixed(1)}`
-        );
-        
-    } catch (error) {
-        vscode.window.showErrorMessage(`Error calculating statistics: ${error}`);
-    }
-}
-
-// Update command count display in status bar
-function updateCommandCountDisplay(statusBarItem: vscode.StatusBarItem) {
-    try {
-        if (!fs.existsSync(LOG_FILE)) {
-            statusBarItem.text = STATUS_BAR_TITLE + ' (0)';
+            statusBar.text = STATUS_BAR_TITLE + ' (0)';
             return;
         }
         
@@ -329,10 +244,74 @@ function updateCommandCountDisplay(statusBarItem: vscode.StatusBarItem) {
             }
         });
         
-        statusBarItem.text = `${STATUS_BAR_TITLE} (${todayCount} today)`;
+        statusBar.text = `${STATUS_BAR_TITLE} (${todayCount} today)`;
         
     } catch (error) {
         console.error('Error updating command count:', error);
+    }
+}
+
+// Set up terminal tracking via PROMPT_COMMAND
+function setupTerminalTracking(terminal: vscode.Terminal) {
+    console.log(`Setting up tracking for terminal: ${terminal.name}`);
+    
+    if (terminal.name.toLowerCase().includes('bash') || 
+        terminal.name.toLowerCase().includes('zsh') ||
+        terminal.name.toLowerCase().includes('terminal')) {
+        
+        // Send command to set up PROMPT_COMMAND for tracking
+        terminal.sendText(`
+# Terminal Tracker initialization
+if [[ -z \${TERMINAL_TRACKER_INIT+x} ]]; then
+    export TERMINAL_TRACKER_INIT=1
+    mkdir -p "${DATA_DIR}"
+    
+    # Simple tracking function
+    log_vscode_cmd() {
+        # Just write the date to a file
+        echo "$(date -u +"%Y-%m-%d")" >> "${DATA_DIR}/cmds.txt"
+    }
+    
+    # Set as PROMPT_COMMAND
+    export PROMPT_COMMAND="log_vscode_cmd;\${PROMPT_COMMAND:-}"
+    echo "Terminal tracker activated"
+fi`, true);
+    }
+}
+
+// Process command files created by terminal tracking
+function processCommandFiles(statusBar: vscode.StatusBarItem) {
+    const cmdFile = path.join(DATA_DIR, 'cmds.txt');
+    if (fs.existsSync(cmdFile)) {
+        try {
+            const content = fs.readFileSync(cmdFile, 'utf8');
+            if (!content.trim()) {
+                return; // Skip empty files
+            }
+            
+            const lines = content.trim().split('\n');
+            
+            // Process each line
+            lines.forEach(date => {
+                if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+                    // Log command
+                    const timestamp = date + 'T00:00:00Z'; 
+                    fs.appendFileSync(
+                        LOG_FILE,
+                        `${timestamp}\tprompt-tracking\tcommand-executed\n`
+                    );
+                }
+            });
+            
+            // Clear the file
+            fs.writeFileSync(cmdFile, '');
+            
+            // Update status bar
+            updateStatusBar(statusBar);
+            
+        } catch (error) {
+            console.error('Error processing command file:', error);
+        }
     }
 }
 

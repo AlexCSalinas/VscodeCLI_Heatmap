@@ -24,10 +24,10 @@
       {
         "command": "terminal-tracker.showHeatmap",
         "title": "Terminal Tracker: Show Command Heatmap"
-      },
+      }, 
       {
-        "command": "terminal-tracker.logCommand",
-        "title": "Terminal Tracker: Log Command Manually"
+        "command": "terminal-tracker.test",
+        "title": "Terminal Tracker: Test Command"
       }
     ]
   },
