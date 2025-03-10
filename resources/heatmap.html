@@ -3,7 +3,6 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';">
   <title>Terminal Command Heatmap</title>
   <style>
     body {
@@ -171,7 +170,7 @@
   
   <script>
     (function() {
-      // Access the VS Code API
+      // Load data from user's home directory
       const vscode = acquireVsCodeApi();
       
       // Helper functions
@@ -309,35 +308,28 @@
       }
       
       // Load the data
-      function loadData() {
+      async function loadData() {
         try {
-          // Request the data from the extension
-          vscode.postMessage({ command: 'loadData' });
+          const homeDir = await vscode.postMessage({ command: 'getHomeDir' });
+          const dataPath = `${homeDir}/.vscode-terminal-tracker/heatmap-data.json`;
+          
+          // Request data from extension
+          vscode.postMessage({ command: 'loadData', path: dataPath });
+          
+          // Listen for response
+          window.addEventListener('message', event => {
+            const message = event.data;
+            if (message.command === 'dataLoaded') {
+              renderHeatmap(message.data);
+            }
+          });
         } catch (error) {
-          console.error('Error requesting data:', error);
+          console.error('Error loading data:', error);
         }
       }
       
-      // Listen for messages from the extension
-      window.addEventListener('message', event => {
-        const message = event.data;
-        
-        switch (message.command) {
-          case 'dataLoaded':
-            renderHeatmap(message.data);
-            break;
-          case 'homeDir':
-            // Store home directory if needed
-            console.log('Home directory:', message.path);
-            break;
-        }
-      });
-      
       // Initialize on page load
       document.addEventListener('DOMContentLoaded', loadData);
-      
-      // Request data immediately to handle cases where DOMContentLoaded already fired
-      loadData();
     })();
   </script>
 </body>

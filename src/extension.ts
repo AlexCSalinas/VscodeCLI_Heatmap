@@ -9,9 +9,6 @@ const LOG_FILE = path.join(LOG_DIR, 'terminal-commands.log');
 const DATA_FILE = path.join(LOG_DIR, 'heatmap-data.json');
 const STATUS_BAR_TITLE = '$(terminal) Terminal Tracker';
 
-// Track webview panel
-let currentPanel: vscode.WebviewPanel | undefined = undefined;
-
 export function activate(context: vscode.ExtensionContext) {
     console.log('Terminal Tracker extension is now active');
     
@@ -48,88 +45,10 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(
         vscode.commands.registerCommand('terminal-tracker.showHeatmap', () => {
             generateHeatmapData();
-            
-            // Get the path to the HTML file
             const heatmapPath = path.join(context.extensionPath, 'resources', 'heatmap.html');
             
-            // Create and show webview panel
-            if (currentPanel) {
-                // If we already have a panel, reveal it
-                currentPanel.reveal(vscode.ViewColumn.One);
-            } else {
-                // Create a new panel
-                currentPanel = vscode.window.createWebviewPanel(
-                    'terminalHeatmap',
-                    'Terminal Usage Heatmap',
-                    vscode.ViewColumn.One,
-                    {
-                        // Enable JavaScript in the webview
-                        enableScripts: true,
-                        // Restrict the webview to only load resources from the extension's directory
-                        localResourceRoots: [vscode.Uri.file(context.extensionPath)]
-                    }
-                );
-                
-                // Handle messages from the webview
-                currentPanel.webview.onDidReceiveMessage(
-                    async (message) => {
-                        switch (message.command) {
-                            case 'getHomeDir':
-                                currentPanel?.webview.postMessage({ 
-                                    command: 'homeDir', 
-                                    path: os.homedir() 
-                                });
-                                break;
-                            case 'loadData':
-                                try {
-                                    // Read data file
-                                    if (fs.existsSync(DATA_FILE)) {
-                                        const dataContent = fs.readFileSync(DATA_FILE, 'utf8');
-                                        const data = JSON.parse(dataContent);
-                                        currentPanel?.webview.postMessage({ 
-                                            command: 'dataLoaded', 
-                                            data: data 
-                                        });
-                                    } else {
-                                        currentPanel?.webview.postMessage({ 
-                                            command: 'dataLoaded', 
-                                            data: [] 
-                                        });
-                                    }
-                                } catch (error) {
-                                    console.error('Error loading data:', error);
-                                }
-                                break;
-                        }
-                    },
-                    undefined,
-                    context.subscriptions
-                );
-                
-                // Reset when the panel is disposed
-                currentPanel.onDidDispose(
-                    () => {
-                        currentPanel = undefined;
-                    },
-                    null,
-                    context.subscriptions
-                );
-            }
-            
-            // Set the HTML content
-            try {
-                if (fs.existsSync(heatmapPath)) {
-                    const htmlContent = fs.readFileSync(heatmapPath, 'utf8');
-                    currentPanel.webview.html = htmlContent;
-                } else {
-                    console.error(`Heatmap HTML file not found at: ${heatmapPath}`);
-                    currentPanel.webview.html = `<html><body><h1>Error: HTML file not found at ${heatmapPath}</h1></body></html>`;
-                    vscode.window.showErrorMessage(`Heatmap HTML file not found at: ${heatmapPath}`);
-                }
-            } catch (error) {
-                console.error('Error loading heatmap HTML:', error);
-                vscode.window.showErrorMessage(`Error loading heatmap: ${error}`);
-            }
+            // Open heatmap in a new editor
+            vscode.commands.executeCommand('vscode.open', vscode.Uri.file(heatmapPath));
             
             // Show confirmation message
             vscode.window.showInformationMessage('Terminal usage heatmap generated and opened!');
