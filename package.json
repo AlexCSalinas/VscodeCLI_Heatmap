@@ -9,6 +9,10 @@
   "categories": [
     "Other"
   ],
+  "files": [
+  "out",
+  "resources"
+  ],
   "activationEvents": [
     "onStartupFinished",
     "onCommand:terminal-tracker.showHeatmap",
