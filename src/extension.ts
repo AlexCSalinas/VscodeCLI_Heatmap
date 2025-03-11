@@ -8,6 +8,7 @@ const DATA_DIR = path.join(os.homedir(), '.vscode-terminal-tracker');
 const LOG_FILE = path.join(DATA_DIR, 'terminal-commands.log');
 const DATA_FILE = path.join(DATA_DIR, 'heatmap-data.json');
 const CMD_FILE = path.join(DATA_DIR, 'cmds.txt');
+const SETUP_SCRIPT = path.join(DATA_DIR, 'setup.sh');
 const STATUS_BAR_TITLE = '$(terminal) Terminal Tracker';
 
 // Track webview panel
@@ -20,6 +21,9 @@ export function activate(context: vscode.ExtensionContext) {
     if (!fs.existsSync(DATA_DIR)) {
         fs.mkdirSync(DATA_DIR, { recursive: true });
     }
+    
+    // Create the setup script file
+    createSetupScript();
     
     // Create status bar item
     const statusBarItem = vscode.window.createStatusBarItem(
@@ -51,9 +55,6 @@ export function activate(context: vscode.ExtensionContext) {
             
             // Display the heatmap
             showHeatmapWebview(context);
-            
-            // Show confirmation
-            vscode.window.showInformationMessage('Terminal usage heatmap generated!');
         })
     );
     
@@ -72,10 +73,79 @@ export function activate(context: vscode.ExtensionContext) {
     // Update status bar initially
     updateStatusBar(statusBarItem);
     
-    // Process any command files periodically (every 10 seconds)
+    // Process any command files more frequently (every 3 seconds)
     setInterval(() => {
         processCommandFiles(statusBarItem);
-    }, 10000);
+    }, 3000);
+}
+
+// Create the setup script file
+function createSetupScript() {
+    const scriptContent = `#!/bin/bash
+# Terminal Tracker setup script
+
+# Create directory if needed
+mkdir -p "${DATA_DIR}"
+
+# Simple tracking function that logs a timestamp when Enter is pressed
+log_vscode_cmd() {
+    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "${CMD_FILE}"
+}
+
+# Handle different shells
+if [ -n "$ZSH_VERSION" ]; then
+    # For Zsh
+    echo "Setting up for Zsh shell" >> "${DATA_DIR}/setup.log"
+    
+    # Define the precmd function for Zsh
+    precmd() {
+        log_vscode_cmd
+    }
+    
+    # Check if it's already in precmd_functions
+    if ! typeset -f precmd > /dev/null; then
+        # Add a test entry to confirm setup
+        echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") ZSH-SETUP" >> "${CMD_FILE}"
+    fi
+    
+elif [ -n "$BASH_VERSION" ]; then
+    # For Bash
+    echo "Setting up for Bash shell" >> "${DATA_DIR}/setup.log"
+    
+    # Add to PROMPT_COMMAND for Bash
+    if [ -z "$PROMPT_COMMAND" ]; then
+        export PROMPT_COMMAND="log_vscode_cmd"
+    else
+        export PROMPT_COMMAND="log_vscode_cmd;$PROMPT_COMMAND"
+    fi
+    
+    # Add a test entry to confirm setup
+    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") BASH-SETUP" >> "${CMD_FILE}"
+    
+else
+    # Generic fallback
+    echo "Setting up for generic shell" >> "${DATA_DIR}/setup.log"
+    
+    # Try setting PROMPT_COMMAND as a fallback
+    export PROMPT_COMMAND="log_vscode_cmd"
+    
+    # Add a test entry to confirm setup
+    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") GENERIC-SETUP" >> "${CMD_FILE}"
+fi
+
+echo "Terminal tracker activated"
+`;
+
+    fs.writeFileSync(SETUP_SCRIPT, scriptContent, { mode: 0o755 });
+    console.log(`Created setup script at ${SETUP_SCRIPT}`);
+}
+
+// Set up terminal tracking by sourcing the script file
+function setupTerminalTracking(terminal: vscode.Terminal) {
+    console.log(`Setting up tracking for terminal: ${terminal.name}`);
+    
+    // Simply source our setup script
+    terminal.sendText(`source "${SETUP_SCRIPT}"`);
 }
 
 // Show the heatmap in a webview
@@ -156,10 +226,17 @@ function showHeatmapWebview(context: vscode.ExtensionContext) {
 // Log a command to the log file
 function logCommand(timestamp: string, source: string, action: string) {
     try {
+        // Ensure LOG_FILE directory exists
+        if (!fs.existsSync(path.dirname(LOG_FILE))) {
+            fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
+        }
+        
+        // Append to log file
         fs.appendFileSync(
             LOG_FILE,
             `${timestamp}\t${source}\t${action}\n`
         );
+        console.log(`Logged command: ${timestamp} ${source} ${action}`);
     } catch (error) {
         console.error('Error logging command:', error);
     }
@@ -238,38 +315,6 @@ function updateStatusBar(statusBar: vscode.StatusBarItem) {
     }
 }
 
-// Set up terminal tracking via PROMPT_COMMAND
-function setupTerminalTracking(terminal: vscode.Terminal) {
-    console.log(`Setting up tracking for terminal: ${terminal.name}`);
-    
-    if (terminal.name.toLowerCase().includes('bash') || 
-        terminal.name.toLowerCase().includes('zsh') ||
-        terminal.name.toLowerCase().includes('terminal')) {
-        
-        // Send command to set up PROMPT_COMMAND for tracking
-        terminal.sendText(`
-# Terminal Tracker initialization
-if [[ -z \${TERMINAL_TRACKER_INIT+x} ]]; then
-    export TERMINAL_TRACKER_INIT=1
-    mkdir -p "${DATA_DIR}"
-    
-    # Simple tracking function - logs timestamp each time Enter is pressed
-    log_vscode_cmd() {
-        echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "${DATA_DIR}/cmds.txt"
-    }
-    
-    # Ensure PROMPT_COMMAND executes our function
-    if [[ -z "\${PROMPT_COMMAND}" ]]; then
-        export PROMPT_COMMAND="log_vscode_cmd"
-    else
-        export PROMPT_COMMAND="log_vscode_cmd;\${PROMPT_COMMAND}"
-    fi
-    
-    echo "Terminal tracker activated"
-fi`, true);
-    }
-}
-
 // Process command files created by terminal tracking
 function processCommandFiles(statusBar: vscode.StatusBarItem) {
     if (fs.existsSync(CMD_FILE)) {
@@ -279,16 +324,39 @@ function processCommandFiles(statusBar: vscode.StatusBarItem) {
                 return; // Skip empty files
             }
             
+            console.log(`Processing cmd file with ${content.trim().split('\n').length} entries`);
+            
             const lines = content.trim().split('\n');
+            let processedCount = 0;
             
             // Process each line (each representing an Enter press)
-            lines.forEach(timestamp => {
-                // Validate timestamp format
+            lines.forEach(line => {
+                // Be more lenient with timestamp format
+                let timestamp = line.trim();
+                
+                // Check if it matches ISO format
                 if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)) {
-                    // Log each timestamp as an "enter-pressed" event
-                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
+                    // Check if this is a setup confirmation
+                    if (timestamp.includes('SETUP')) {
+                        const parts = timestamp.split(' ');
+                        logCommand(parts[0], 'setup', parts[1] || 'initialization');
+                    } else {
+                        // Log each timestamp as an "enter-pressed" event
+                        logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
+                    }
+                    processedCount++;
+                } 
+                // Also accept other date formats
+                else if (timestamp.match(/^\d{4}-\d{2}-\d{2}/)) {
+                    // Try to standardize the timestamp
+                    const datePart = timestamp.substring(0, 10);
+                    const fullTimestamp = `${datePart}T00:00:00Z`;
+                    logCommand(fullTimestamp, 'prompt-tracking', 'enter-pressed');
+                    processedCount++;
                 }
             });
+            
+            console.log(`Processed ${processedCount} command entries`);
             
             // Clear the file
             fs.writeFileSync(CMD_FILE, '');
@@ -299,6 +367,8 @@ function processCommandFiles(statusBar: vscode.StatusBarItem) {
         } catch (error) {
             console.error('Error processing command file:', error);
         }
+    } else {
+        console.log(`Command file doesn't exist at: ${CMD_FILE}`);
     }
 }
 
