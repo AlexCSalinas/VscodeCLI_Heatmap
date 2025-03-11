@@ -28,6 +28,7 @@
     .heatmap {
       display: grid;
       grid-template-columns: repeat(53, 15px);
+      grid-template-rows: repeat(7, 15px);
       grid-gap: 3px;
       margin-bottom: 20px;
     }
@@ -38,6 +39,7 @@
       border-radius: 2px;
       cursor: pointer;
       transition: transform 0.1s ease;
+      border: 1px solid rgba(255, 255, 255, 0.3);
     }
     
     .day:hover {
@@ -201,105 +203,99 @@
         
         // Create a full year of dates for the heatmap
         const today = new Date();
+        // Add 1 day to fix the date issue
+        today.setDate(today.getDate() + 1);
         const oneYearAgo = new Date();
         oneYearAgo.setFullYear(today.getFullYear() - 1);
         
-        // Create a map of all dates in the year
-        const dateMap = new Map();
-        const monthsSet = new Set();
-        
-        // Start with the first Sunday before or on oneYearAgo
+        // Adjust to get exactly Sunday as the first day
         const startDate = new Date(oneYearAgo);
-        startDate.setDate(startDate.getDate() - startDate.getDay());
+        // Get the day of the week (0 = Sunday, 6 = Saturday)
+        const startDay = startDate.getDay();
+        // If not Sunday, adjust to previous Sunday
+        startDate.setDate(startDate.getDate() - startDay);
         
-        // Fill in all dates for the year
-        for (let i = 0; i < 53 * 7; i++) {
-          const currentDate = new Date(startDate);
-          currentDate.setDate(startDate.getDate() + i);
-          
-          if (currentDate > today) break;
-          
-          const dateString = currentDate.toISOString().split('T')[0];
-          dateMap.set(dateString, 0);
-          
-          // Track month changes for labels
-          const monthKey = `${currentDate.getFullYear()}-${currentDate.getMonth()}`;
-          if (currentDate.getDay() === 0) { // Only on Sundays
-            monthsSet.add({
-              key: monthKey,
-              date: new Date(currentDate),
-              index: Math.floor(i / 7)
-            });
-          }
-        }
+        // Clear previous elements
+        heatmapContainer.innerHTML = '';
+        monthLabelsContainer.innerHTML = '';
         
-        // Update with actual data
+        let currentMonth = -1;
+        let activeDays = 0;
         let totalCommands = 0;
         let bestDay = { date: '', count: 0 };
         
-        data.forEach(item => {
-          if (dateMap.has(item.date)) {
-            dateMap.set(item.date, item.count);
-            totalCommands += item.count;
+        // Create week-based grid
+        for (let weekNum = 0; weekNum < 53; weekNum++) {
+          // For days: 0 = Sunday, 1 = Monday, ... 6 = Saturday
+          for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
+            const currentDate = new Date(startDate);
+            currentDate.setDate(startDate.getDate() + (weekNum * 7) + dayIndex);
             
-            if (item.count > bestDay.count) {
-              bestDay = { date: item.date, count: item.count };
+            // Skip dates beyond today
+            if (currentDate > today) continue;
+            
+            // Check for month change (only on the first row)
+            if (dayIndex === 0 && currentDate.getMonth() !== currentMonth) {
+              currentMonth = currentDate.getMonth();
+              
+              // Add month label
+              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+              const monthLabel = document.createElement('span');
+              monthLabel.textContent = monthNames[currentMonth];
+              monthLabel.style.gridColumnStart = weekNum + 1;
+              monthLabelsContainer.appendChild(monthLabel);
             }
+            
+            // Use local timezone date formatting instead of UTC
+            const dateString = 
+              currentDate.getFullYear() + '-' + 
+              String(currentDate.getMonth() + 1).padStart(2, '0') + '-' + 
+              String(currentDate.getDate()).padStart(2, '0');
+            
+            // Get count from data if it exists
+            let count = 0;
+            const dataItem = data.find(item => item.date === dateString);
+            if (dataItem) {
+              count = dataItem.count;
+              totalCommands += count;
+              
+              if (count > bestDay.count) {
+                bestDay = { date: dateString, count: count };
+              }
+              
+              if (count > 0) activeDays++;
+            }
+            
+            // Create the day element
+            const dayElement = document.createElement('div');
+            dayElement.className = 'day';
+            
+            // Position in grid: dayIndex 0 (Sunday) should be row 1, dayIndex 6 (Saturday) should be row 7
+            dayElement.style.gridRowStart = dayIndex + 1;
+            dayElement.style.gridColumnStart = weekNum + 1;
+            
+            // Set background color
+            dayElement.style.backgroundColor = getColorForCount(count);
+            
+            // Add tooltip interaction
+            dayElement.addEventListener('mouseover', (e) => {
+              const rect = e.target.getBoundingClientRect();
+              tooltipElement.style.left = `${rect.left + window.scrollX - 80}px`;
+              tooltipElement.style.top = `${rect.top + window.scrollY - 60}px`;
+              tooltipElement.innerHTML = `
+                <div>${formatDate(dateString)}</div>
+                <div><strong>${count} commands</strong></div>
+              `;
+              tooltipElement.style.opacity = '1';
+            });
+            
+            dayElement.addEventListener('mouseout', () => {
+              tooltipElement.style.opacity = '0';
+            });
+            
+            heatmapContainer.appendChild(dayElement);
           }
-        });
-        
-        // Create the month labels
-        const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-        const monthLabels = Array.from(monthsSet);
-        
-        // Clear previous labels
-        monthLabelsContainer.innerHTML = '';
-        
-        // Add spacer for the first cell
-        const spacer = document.createElement('span');
-        spacer.style.gridColumn = '1';
-        monthLabelsContainer.appendChild(spacer);
-        
-        // Add month labels
-        monthLabels.forEach(month => {
-          if (month.date.getDate() <= 7) { // Only show the month name once
-            const label = document.createElement('span');
-            label.textContent = monthNames[month.date.getMonth()];
-            label.style.gridColumn = month.index + 1;
-            monthLabelsContainer.appendChild(label);
-          }
-        });
-        
-        // Clear previous cells
-        heatmapContainer.innerHTML = '';
-        
-        // Create each day cell
-        let activeDays = 0;
-        dateMap.forEach((count, date) => {
-          const dayElement = document.createElement('div');
-          dayElement.className = 'day';
-          dayElement.style.backgroundColor = getColorForCount(count);
-          
-          if (count > 0) activeDays++;
-          
-          // Add tooltip interaction
-          dayElement.addEventListener('mouseover', (e) => {
-            const rect = e.target.getBoundingClientRect();
-            tooltipElement.style.left = `${rect.left + window.scrollX - 80}px`;
-            tooltipElement.style.top = `${rect.top + window.scrollY - 60}px`;
-            tooltipElement.innerHTML = `
-              <div>${formatDate(date)}</div>
-              <div><strong>${count} commands</strong></div>
-            `;
-            tooltipElement.style.opacity = '1';
-          });
-          
-          dayElement.addEventListener('mouseout', () => {
-            tooltipElement.style.opacity = '0';
-          });
-          
-          heatmapContainer.appendChild(dayElement);
-        });
+        }
         
         // Update statistics
         document.getElementById('total-commands').textContent = totalCommands;

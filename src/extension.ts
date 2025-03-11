@@ -89,7 +89,7 @@ mkdir -p "${DATA_DIR}"
 
 # Simple tracking function that logs a timestamp when Enter is pressed
 log_vscode_cmd() {
-    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "${CMD_FILE}"
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z")" >> "${CMD_FILE}"
 }
 
 # Handle different shells
@@ -105,7 +105,7 @@ if [ -n "$ZSH_VERSION" ]; then
     # Check if it's already in precmd_functions
     if ! typeset -f precmd > /dev/null; then
         # Add a test entry to confirm setup
-        echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") ZSH-SETUP" >> "${CMD_FILE}"
+        echo "$(date +"%Y-%m-%dT%H:%M:%S%z") ZSH-SETUP" >> "${CMD_FILE}"
     fi
     
 elif [ -n "$BASH_VERSION" ]; then
@@ -120,7 +120,7 @@ elif [ -n "$BASH_VERSION" ]; then
     fi
     
     # Add a test entry to confirm setup
-    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") BASH-SETUP" >> "${CMD_FILE}"
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z") BASH-SETUP" >> "${CMD_FILE}"
     
 else
     # Generic fallback
@@ -130,7 +130,7 @@ else
     export PROMPT_COMMAND="log_vscode_cmd"
     
     # Add a test entry to confirm setup
-    echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ") GENERIC-SETUP" >> "${CMD_FILE}"
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z") GENERIC-SETUP" >> "${CMD_FILE}"
 fi
 
 echo "Terminal tracker activated"
@@ -231,12 +231,28 @@ function logCommand(timestamp: string, source: string, action: string) {
             fs.mkdirSync(path.dirname(LOG_FILE), { recursive: true });
         }
         
+        // Extract the date part
+        const datePart = timestamp.substring(0, 10);
+        
+        // Create date object and add one day to fix the offset
+        const dateObj = new Date(datePart + 'T00:00:00');
+        dateObj.setDate(dateObj.getDate() + 1);
+        
+        // Format back to YYYY-MM-DD
+        const adjustedDatePart = dateObj.getFullYear() + '-' + 
+            String(dateObj.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(dateObj.getDate()).padStart(2, '0');
+        
+        // Reconstruct timestamp with adjusted date
+        const timeAndZonePart = timestamp.substring(10);
+        const adjustedTimestamp = adjustedDatePart + timeAndZonePart;
+        
         // Append to log file
         fs.appendFileSync(
             LOG_FILE,
-            `${timestamp}\t${source}\t${action}\n`
+            `${adjustedTimestamp}\t${source}\t${action}\n`
         );
-        console.log(`Logged command: ${timestamp} ${source} ${action}`);
+        console.log(`Logged command: ${adjustedTimestamp} ${source} ${action}`);
     } catch (error) {
         console.error('Error logging command:', error);
     }
@@ -260,9 +276,19 @@ function generateHeatmapData() {
         lines.forEach(line => {
             const parts = line.split('\t');
             if (parts.length >= 1) {
-                // Extract date from ISO timestamp (YYYY-MM-DD)
+                // Extract date from timestamp (YYYY-MM-DD)
                 const date = parts[0].substring(0, 10);
-                dateMap[date] = (dateMap[date] || 0) + 1;
+                
+                // Create date object from the log date
+                const logDateObj = new Date(date + 'T00:00:00');
+                
+                // Format back to YYYY-MM-DD (no need to adjust here since we already adjusted when logging)
+                const adjustedDate = logDateObj.getFullYear() + '-' + 
+                    String(logDateObj.getMonth() + 1).padStart(2, '0') + '-' + 
+                    String(logDateObj.getDate()).padStart(2, '0');
+                
+                // Use the adjusted date for counting
+                dateMap[adjustedDate] = (dateMap[adjustedDate] || 0) + 1;
             }
         });
         
@@ -296,15 +322,31 @@ function updateStatusBar(statusBar: vscode.StatusBarItem) {
         const logData = fs.readFileSync(LOG_FILE, 'utf8');
         const lines = logData.trim().split('\n');
         
-        // Get today's date
-        const today = new Date().toISOString().substring(0, 10);
+        // Get today's date in local timezone
+        const now = new Date();
+        const today = now.getFullYear() + '-' + 
+            String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(now.getDate()).padStart(2, '0');
+        
+        // Get tomorrow's date to compare with adjusted logs
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        const tomorrowStr = tomorrow.getFullYear() + '-' + 
+            String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(tomorrow.getDate()).padStart(2, '0');
         
         // Count today's commands
         let todayCount = 0;
         lines.forEach(line => {
             const parts = line.split('\t');
-            if (parts.length >= 1 && parts[0].startsWith(today)) {
-                todayCount++;
+            if (parts.length >= 1) {
+                // Extract date from timestamp (YYYY-MM-DD)
+                const logDate = parts[0].substring(0, 10);
+                
+                // Check if this log corresponds to today (matches tomorrow in the log because we shifted dates forward)
+                if (logDate === tomorrowStr) {
+                    todayCount++;
+                }
             }
         });
         
@@ -333,24 +375,36 @@ function processCommandFiles(statusBar: vscode.StatusBarItem) {
             lines.forEach(line => {
                 // Be more lenient with timestamp format
                 let timestamp = line.trim();
+                let parts;
                 
-                // Check if it matches ISO format
-                if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)) {
-                    // Check if this is a setup confirmation
-                    if (timestamp.includes('SETUP')) {
-                        const parts = timestamp.split(' ');
-                        logCommand(parts[0], 'setup', parts[1] || 'initialization');
-                    } else {
-                        // Log each timestamp as an "enter-pressed" event
-                        logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
-                    }
+                // Check if this is a setup confirmation with space
+                if (timestamp.includes(' SETUP')) {
+                    parts = timestamp.split(' ');
+                    logCommand(parts[0], 'setup', parts[1] || 'initialization');
                     processedCount++;
-                } 
-                // Also accept other date formats
+                }
+                // Check if it matches ISO format with Z (UTC)
+                else if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)) {
+                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
+                    processedCount++;
+                }
+                // Check if it matches ISO format with timezone offset (+/-NNNN)
+                else if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}$/)) {
+                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
+                    processedCount++;
+                }
+                // Also accept other date formats that just have the date portion
                 else if (timestamp.match(/^\d{4}-\d{2}-\d{2}/)) {
-                    // Try to standardize the timestamp
+                    // Try to standardize the timestamp - use local time instead of UTC
                     const datePart = timestamp.substring(0, 10);
-                    const fullTimestamp = `${datePart}T00:00:00Z`;
+                    const now = new Date();
+                    const timeString = now.toTimeString().split(' ')[0]; // HH:MM:SS format
+                    const timezoneOffset = now.getTimezoneOffset();
+                    const offsetHours = Math.abs(Math.floor(timezoneOffset / 60)).toString().padStart(2, '0');
+                    const offsetMinutes = Math.abs(timezoneOffset % 60).toString().padStart(2, '0');
+                    const offsetSign = timezoneOffset <= 0 ? '+' : '-';
+                    const fullTimestamp = `${datePart}T${timeString}${offsetSign}${offsetHours}${offsetMinutes}`;
+                    
                     logCommand(fullTimestamp, 'prompt-tracking', 'enter-pressed');
                     processedCount++;
                 }
