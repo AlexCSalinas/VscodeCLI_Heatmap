@@ -7,6 +7,7 @@ import * as os from 'os';
 const DATA_DIR = path.join(os.homedir(), '.vscode-terminal-tracker');
 const LOG_FILE = path.join(DATA_DIR, 'terminal-commands.log');
 const DATA_FILE = path.join(DATA_DIR, 'heatmap-data.json');
+const CMD_FILE = path.join(DATA_DIR, 'cmds.txt');
 const STATUS_BAR_TITLE = '$(terminal) Terminal Tracker';
 
 // Track webview panel
@@ -31,7 +32,7 @@ export function activate(context: vscode.ExtensionContext) {
     statusBarItem.show();
     context.subscriptions.push(statusBarItem);
     
-    // Register commands - THIS PATTERN WORKS!
+    // Register commands
     context.subscriptions.push(
         vscode.commands.registerCommand('terminal-tracker.test', () => {
             vscode.window.showInformationMessage('Test command works!');
@@ -42,47 +43,39 @@ export function activate(context: vscode.ExtensionContext) {
         vscode.commands.registerCommand('terminal-tracker.showHeatmap', () => {
             console.log("Heatmap command executing");
             
-            // First generate the data file
+            // Process any pending command files first
+            processCommandFiles(statusBarItem);
+            
+            // Generate the data file
             generateHeatmapData();
             
-            // Then display the heatmap
+            // Display the heatmap
             showHeatmapWebview(context);
             
             // Show confirmation
-            vscode.window.showInformationMessage('Heatmap command works!');
+            vscode.window.showInformationMessage('Terminal usage heatmap generated!');
         })
     );
     
-    // Track terminal commands if the API is available
-    if ('onDidExecuteTerminalCommand' in vscode.window) {
-        context.subscriptions.push(
-            (vscode.window as any).onDidExecuteTerminalCommand((commandLine: string) => {
-                // Log command with timestamp
-                logCommand(commandLine);
-                updateStatusBar(statusBarItem);
-            })
-        );
-    }
-    
-    // Fallback tracking for bash/zsh terminals
+    // Track all terminals at startup
+    vscode.window.terminals.forEach(terminal => {
+        setupTerminalTracking(terminal);
+    });
+
+    // Track new terminals as they're created
     context.subscriptions.push(
         vscode.window.onDidOpenTerminal(terminal => {
             setupTerminalTracking(terminal);
         })
     );
     
-    // Track existing terminals too
-    vscode.window.terminals.forEach(terminal => {
-        setupTerminalTracking(terminal);
-    });
-    
     // Update status bar initially
     updateStatusBar(statusBarItem);
     
-    // Process any command files periodically
+    // Process any command files periodically (every 10 seconds)
     setInterval(() => {
         processCommandFiles(statusBarItem);
-    }, 5000);
+    }, 10000);
 }
 
 // Show the heatmap in a webview
@@ -161,17 +154,11 @@ function showHeatmapWebview(context: vscode.ExtensionContext) {
 }
 
 // Log a command to the log file
-function logCommand(command: string) {
+function logCommand(timestamp: string, source: string, action: string) {
     try {
-        // Create a timestamp
-        const timestamp = new Date().toISOString();
-        
-        // Log command with timestamp and active terminal info
-        const activeTerm = vscode.window.activeTerminal ? vscode.window.activeTerminal.name : 'unknown';
-        
         fs.appendFileSync(
             LOG_FILE,
-            `${timestamp}\t${activeTerm}\t${command}\n`
+            `${timestamp}\t${source}\t${action}\n`
         );
     } catch (error) {
         console.error('Error logging command:', error);
@@ -266,14 +253,18 @@ if [[ -z \${TERMINAL_TRACKER_INIT+x} ]]; then
     export TERMINAL_TRACKER_INIT=1
     mkdir -p "${DATA_DIR}"
     
-    # Simple tracking function
+    # Simple tracking function - logs timestamp each time Enter is pressed
     log_vscode_cmd() {
-        # Just write the date to a file
-        echo "$(date -u +"%Y-%m-%d")" >> "${DATA_DIR}/cmds.txt"
+        echo "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> "${DATA_DIR}/cmds.txt"
     }
     
-    # Set as PROMPT_COMMAND
-    export PROMPT_COMMAND="log_vscode_cmd;\${PROMPT_COMMAND:-}"
+    # Ensure PROMPT_COMMAND executes our function
+    if [[ -z "\${PROMPT_COMMAND}" ]]; then
+        export PROMPT_COMMAND="log_vscode_cmd"
+    else
+        export PROMPT_COMMAND="log_vscode_cmd;\${PROMPT_COMMAND}"
+    fi
+    
     echo "Terminal tracker activated"
 fi`, true);
     }
@@ -281,30 +272,26 @@ fi`, true);
 
 // Process command files created by terminal tracking
 function processCommandFiles(statusBar: vscode.StatusBarItem) {
-    const cmdFile = path.join(DATA_DIR, 'cmds.txt');
-    if (fs.existsSync(cmdFile)) {
+    if (fs.existsSync(CMD_FILE)) {
         try {
-            const content = fs.readFileSync(cmdFile, 'utf8');
+            const content = fs.readFileSync(CMD_FILE, 'utf8');
             if (!content.trim()) {
                 return; // Skip empty files
             }
             
             const lines = content.trim().split('\n');
             
-            // Process each line
-            lines.forEach(date => {
-                if (date.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                    // Log command
-                    const timestamp = date + 'T00:00:00Z'; 
-                    fs.appendFileSync(
-                        LOG_FILE,
-                        `${timestamp}\tprompt-tracking\tcommand-executed\n`
-                    );
+            // Process each line (each representing an Enter press)
+            lines.forEach(timestamp => {
+                // Validate timestamp format
+                if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)) {
+                    // Log each timestamp as an "enter-pressed" event
+                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
                 }
             });
             
             // Clear the file
-            fs.writeFileSync(cmdFile, '');
+            fs.writeFileSync(CMD_FILE, '');
             
             // Update status bar
             updateStatusBar(statusBar);
