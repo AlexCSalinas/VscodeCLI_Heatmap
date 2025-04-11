@@ -1,6 +1,7 @@
 # Terminal Command Tracker for VSCode
 
 This extension tracks commands entered in your VSCode integrated terminal and visualizes your terminal usage in a GitHub-style contribution graph.
+<img width="1049" alt="Screenshot 2025-04-11 at 2 07 32 AM" src="https://github.com/user-attachments/assets/7937d547-5776-4025-b7ac-dac769f3256d" />
 
 ## Features
 
