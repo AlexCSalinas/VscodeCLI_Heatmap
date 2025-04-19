@@ -18,7 +18,8 @@
   ],
   "files": [
   "out",
-  "resources"
+  "resources", 
+  "src/images"
   ],
   "activationEvents": [
     "onStartupFinished",
