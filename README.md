@@ -1,9 +1,5 @@
 # Terminal Command Tracker for VSCode
 
-![Visual Studio Marketplace Version](https://img.shields.io/visual-studio-marketplace/v/AlexanderSalinas.terminal-tracker)
-![Visual Studio Marketplace Downloads](https://img.shields.io/visual-studio-marketplace/d/AlexanderSalinas.terminal-tracker)
-![Visual Studio Marketplace Rating](https://img.shields.io/visual-studio-marketplace/r/AlexanderSalinas.terminal-tracker)
-
 Track and visualize your terminal usage in VSCode with a GitHub-style contribution graph.
 
 ## Overview
