@@ -39,7 +39,7 @@
       border-radius: 2px;
       cursor: pointer;
       transition: transform 0.1s ease;
-      border: 1px solid rgba(255, 255, 255, 0.3);
+      border: 1px solid rgb(255, 255, 255);
     }
     
     .day:hover {
@@ -201,89 +201,84 @@
         const tooltipElement = document.getElementById('tooltip');
         const monthLabelsContainer = document.getElementById('month-labels');
         
-        // Create a full year of dates for the heatmap
-        const today = new Date();
-        // Add 1 day to fix the date issue
-        today.setDate(today.getDate() + 1);
-        const oneYearAgo = new Date();
-        oneYearAgo.setFullYear(today.getFullYear() - 1);
-        
-        // Adjust to get exactly Sunday as the first day
-        const startDate = new Date(oneYearAgo);
-        // Get the day of the week (0 = Sunday, 6 = Saturday)
-        const startDay = startDate.getDay();
-        // If not Sunday, adjust to previous Sunday
-        startDate.setDate(startDate.getDate() - startDay);
-        
         // Clear previous elements
         heatmapContainer.innerHTML = '';
         monthLabelsContainer.innerHTML = '';
         
-        let currentMonth = -1;
-        let activeDays = 0;
+        // FIXED: Explicitly calculate the date range for one year back from today
+        const today = new Date();
+        const oneYearAgo = new Date(today);
+        oneYearAgo.setFullYear(today.getFullYear() - 1);
+        
+        // Find the first Sunday (start of week) before or on the oneYearAgo date
+        const startDate = new Date(oneYearAgo);
+        const dayOfWeek = startDate.getDay(); // 0 = Sunday, 1 = Monday, etc.
+        startDate.setDate(startDate.getDate() - dayOfWeek); // Go back to last Sunday
+        
+        console.log("Start date:", startDate.toISOString());
+        console.log("End date:", today.toISOString());
+        
         let totalCommands = 0;
+        let activeDays = 0;
         let bestDay = { date: '', count: 0 };
         
-        // Create week-based grid
-        for (let weekNum = 0; weekNum < 53; weekNum++) {
-          // For days: 0 = Sunday, 1 = Monday, ... 6 = Saturday
-          for (let dayIndex = 0; dayIndex < 7; dayIndex++) {
-            const currentDate = new Date(startDate);
-            currentDate.setDate(startDate.getDate() + (weekNum * 7) + dayIndex);
+        // Track month changes for labels
+        let currentMonth = -1;
+        
+        // Loop through each week (52 weeks in a year + 1 for partial weeks)
+        for (let week = 0; week < 53; week++) {
+          for (let dayOfWeek = 0; dayOfWeek < 7; dayOfWeek++) {
+            // Calculate the date for this cell
+            const cellDate = new Date(startDate);
+            cellDate.setDate(startDate.getDate() + (week * 7) + dayOfWeek);
             
-            // Skip dates beyond today
-            if (currentDate > today) continue;
+            // Skip if beyond today
+            if (cellDate > today) continue;
             
-            // Check for month change (only on the first row)
-            if (dayIndex === 0 && currentDate.getMonth() !== currentMonth) {
-              currentMonth = currentDate.getMonth();
-              
-              // Add month label
-              const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-              const monthLabel = document.createElement('span');
-              monthLabel.textContent = monthNames[currentMonth];
-              monthLabel.style.gridColumnStart = weekNum + 1;
-              monthLabelsContainer.appendChild(monthLabel);
+            // Add month label on first row if month changes
+            if (dayOfWeek === 0) {
+              const month = cellDate.getMonth();
+              if (month !== currentMonth) {
+                currentMonth = month;
+                const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const monthLabel = document.createElement('span');
+                monthLabel.textContent = monthNames[month];
+                monthLabel.style.gridColumnStart = week + 1;
+                monthLabelsContainer.appendChild(monthLabel);
+              }
             }
             
-            // Use local timezone date formatting instead of UTC
-            const dateString = 
-              currentDate.getFullYear() + '-' + 
-              String(currentDate.getMonth() + 1).padStart(2, '0') + '-' + 
-              String(currentDate.getDate()).padStart(2, '0');
+            // Format date as YYYY-MM-DD for lookup in data
+            const dateStr = cellDate.getFullYear() + '-' + 
+              String(cellDate.getMonth() + 1).padStart(2, '0') + '-' + 
+              String(cellDate.getDate()).padStart(2, '0');
             
-            // Get count from data if it exists
+            // Find if we have data for this date
             let count = 0;
-            const dataItem = data.find(item => item.date === dateString);
+            const dataItem = data.find(item => item.date === dateStr);
             if (dataItem) {
               count = dataItem.count;
               totalCommands += count;
-              
               if (count > bestDay.count) {
-                bestDay = { date: dateString, count: count };
+                bestDay = { date: dateStr, count: count };
               }
-              
               if (count > 0) activeDays++;
             }
             
             // Create the day element
             const dayElement = document.createElement('div');
             dayElement.className = 'day';
-            
-            // Position in grid: dayIndex 0 (Sunday) should be row 1, dayIndex 6 (Saturday) should be row 7
-            dayElement.style.gridRowStart = dayIndex + 1;
-            dayElement.style.gridColumnStart = weekNum + 1;
-            
-            // Set background color
+            dayElement.style.gridRowStart = dayOfWeek + 1;
+            dayElement.style.gridColumnStart = week + 1;
             dayElement.style.backgroundColor = getColorForCount(count);
             
-            // Add tooltip interaction
+            // Add tooltip
             dayElement.addEventListener('mouseover', (e) => {
               const rect = e.target.getBoundingClientRect();
               tooltipElement.style.left = `${rect.left + window.scrollX - 80}px`;
               tooltipElement.style.top = `${rect.top + window.scrollY - 60}px`;
               tooltipElement.innerHTML = `
-                <div>${formatDate(dateString)}</div>
+                <div>${formatDate(dateStr)}</div>
                 <div><strong>${count} commands</strong></div>
               `;
               tooltipElement.style.opacity = '1';
@@ -300,7 +295,7 @@
         // Update statistics
         document.getElementById('total-commands').textContent = totalCommands;
         document.getElementById('active-days').textContent = activeDays;
-        document.getElementById('best-day-count').textContent = bestDay.count;
+        document.getElementById('best-day-count').textContent = bestDay.count > 0 ? bestDay.count : 0;
         document.getElementById('avg-commands').textContent = (activeDays > 0 ? (totalCommands / activeDays).toFixed(1) : '0');
       }
       

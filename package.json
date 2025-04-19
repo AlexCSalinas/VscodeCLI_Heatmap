@@ -3,6 +3,13 @@
   "displayName": "Terminal Command Tracker",
   "description": "Tracks VSCode terminal commands and displays usage statistics in a GitHub-style heatmap",
   "version": "0.1.0",
+  "publisher": "AlexanderSalinas",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AlexCSalinas/VscodeCLI_Heatmap"
+  },
+  "icon": "src/images/icon.png",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.60.0"
   },

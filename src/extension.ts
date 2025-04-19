@@ -178,21 +178,27 @@ function showHeatmapWebview(context: vscode.ExtensionContext) {
             switch (message.command) {
                 case 'loadData':
                     try {
+                        // Create a full year of empty data (if no data file exists yet)
+                        let data = [];
+                        
+                        // If the data file exists, load existing data
                         if (fs.existsSync(DATA_FILE)) {
                             const dataContent = fs.readFileSync(DATA_FILE, 'utf8');
-                            const data = JSON.parse(dataContent);
-                            currentPanel?.webview.postMessage({ 
-                                command: 'dataLoaded', 
-                                data: data 
-                            });
-                        } else {
-                            currentPanel?.webview.postMessage({ 
-                                command: 'dataLoaded', 
-                                data: [] 
-                            });
+                            data = JSON.parse(dataContent);
                         }
+                        
+                        // Send data to WebView
+                        currentPanel?.webview.postMessage({ 
+                            command: 'dataLoaded', 
+                            data: data 
+                        });
                     } catch (error) {
                         console.error('Error loading data:', error);
+                        // Send empty data as fallback
+                        currentPanel?.webview.postMessage({ 
+                            command: 'dataLoaded', 
+                            data: [] 
+                        });
                     }
                     break;
             }
