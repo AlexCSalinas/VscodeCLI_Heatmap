@@ -242,7 +242,7 @@ function logCommand(timestamp: string, source: string, action: string) {
         
         // Create date object and add one day to fix the offset
         const dateObj = new Date(datePart + 'T00:00:00');
-        dateObj.setDate(dateObj.getDate() + 1);
+        //dateObj.setDate(dateObj.getDate() + 1);
         
         // Format back to YYYY-MM-DD
         const adjustedDatePart = dateObj.getFullYear() + '-' + 
@@ -349,8 +349,8 @@ function updateStatusBar(statusBar: vscode.StatusBarItem) {
                 // Extract date from timestamp (YYYY-MM-DD)
                 const logDate = parts[0].substring(0, 10);
                 
-                // Check if this log corresponds to today (matches tomorrow in the log because we shifted dates forward)
-                if (logDate === tomorrowStr) {
+                // Check if this log corresponds to today
+                if (logDate === today) {
                     todayCount++;
                 }
             }
