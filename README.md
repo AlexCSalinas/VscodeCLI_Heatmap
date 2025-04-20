@@ -43,7 +43,7 @@ This extension doesn't have any customizable settings yet. Configuration options
 
 ## Release Notes
 
-### 0.1.3
+### 0.1.4
 
 - Initial release of Terminal Command Tracker
 - Command logging and visualization

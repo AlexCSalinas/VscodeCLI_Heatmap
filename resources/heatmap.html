@@ -206,7 +206,7 @@
         monthLabelsContainer.innerHTML = '';
         
         // FIXED: Explicitly calculate the date range for one year back from today
-        const today = new Date();
+        const today = new Date(new Date().setDate(new Date().getDate() + 1));
         const oneYearAgo = new Date(today);
         oneYearAgo.setFullYear(today.getFullYear() - 1);
         
