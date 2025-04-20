@@ -179,6 +179,7 @@
       // Helper functions
       function formatDate(dateStr) {
         const date = new Date(dateStr);
+        date.setDate(date.getDate() + 1);
         return date.toLocaleDateString('en-US', { 
           weekday: 'long', 
           year: 'numeric', 
