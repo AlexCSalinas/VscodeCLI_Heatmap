@@ -334,12 +334,12 @@ function updateStatusBar(statusBar: vscode.StatusBarItem) {
             String(now.getMonth() + 1).padStart(2, '0') + '-' + 
             String(now.getDate()).padStart(2, '0');
         
-        // Get tomorrow's date to compare with adjusted logs
+        /* Get tomorrow's date to compare with adjusted logs
         const tomorrow = new Date(now);
         tomorrow.setDate(tomorrow.getDate() + 1);
         const tomorrowStr = tomorrow.getFullYear() + '-' + 
             String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + 
-            String(tomorrow.getDate()).padStart(2, '0');
+            String(tomorrow.getDate()).padStart(2, '0');*/
         
         // Count today's commands
         let todayCount = 0;
