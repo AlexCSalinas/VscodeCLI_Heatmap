@@ -2,7 +2,7 @@
   "name": "terminal-tracker",
   "displayName": "Terminal Command Tracker",
   "description": "Tracks VSCode terminal commands and displays usage statistics in a GitHub-style heatmap",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "AlexanderSalinas",
   "repository": {
     "type": "git",
