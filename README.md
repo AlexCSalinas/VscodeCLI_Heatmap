@@ -43,7 +43,7 @@ This extension doesn't have any customizable settings yet. Configuration options
 
 ## Release Notes
 
-### 0.1.6
+### 0.1.7
 
 - Updated the map coloring
 
