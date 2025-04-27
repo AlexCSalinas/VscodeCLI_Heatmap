@@ -1,7 +1,7 @@
 # Terminal Command Tracker for VSCode
 
 Track and visualize your terminal usage in VSCode with a GitHub-style contribution graph.
-
+![example](src/images/example.png)
 ## Overview
 
 Terminal Command Tracker automatically logs commands entered in your VSCode integrated terminal and presents your activity in an intuitive heatmap visualization. Gain insights into your command-line habits and productivity patterns over time.
