@@ -1,6 +1,7 @@
 # Terminal Command Tracker for VSCode
 
 Track and visualize your terminal usage in VSCode with a GitHub-style contribution graph.
+
 ![example](src/images/example.png)
 ## Overview
 
