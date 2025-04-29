@@ -124,6 +124,49 @@
       font-size: 14px;
       color: var(--vscode-descriptionForeground);
     }
+    
+    .success-rate-container {
+      margin-top: 20px;
+      width: 100%;
+      max-width: 600px;
+    }
+    
+    .success-rate-bar {
+      height: 25px;
+      width: 100%;
+      background-color: #772222;
+      border-radius: 4px;
+      position: relative;
+      overflow: hidden;
+      margin-top: 8px;
+    }
+    
+    .success-rate-fill {
+      height: 100%;
+      background-color: #22a843;
+      transition: width 0.5s ease;
+    }
+    
+    .success-rate-text {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: white;
+      font-weight: bold;
+      text-shadow: 0 0 2px rgba(0, 0, 0, 0.8);
+    }
+    
+    /* Animation for real-time updates */
+    @keyframes pulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.1); }
+      100% { transform: scale(1); }
+    }
+    
+    .day.updated {
+      animation: pulse 0.5s ease;
+    }
   </style>
 </head>
 <body>
@@ -146,6 +189,14 @@
       </div>
     </div>
     
+    <div class="success-rate-container">
+      <h3>Command Success Rate</h3>
+      <div class="success-rate-bar">
+        <div id="success-rate-fill" class="success-rate-fill" style="width: 100%;"></div>
+        <div id="success-rate-text" class="success-rate-text">100%</div>
+      </div>
+    </div>
+    
     <div class="stat-box">
       <h3>Command Statistics</h3>
       <div class="stat-grid">
@@ -165,6 +216,14 @@
           <div class="stat-value" id="avg-commands">0</div>
           <div class="stat-label">Daily Average</div>
         </div>
+        <div class="stat-item">
+          <div class="stat-value" id="success-count">0</div>
+          <div class="stat-label">Successful Commands</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="failure-count">0</div>
+          <div class="stat-label">Failed Commands</div>
+        </div>
       </div>
     </div>
   </div>
@@ -175,6 +234,9 @@
     (function() {
       // Access the VS Code API
       const vscode = acquireVsCodeApi();
+      
+      // Track our current data
+      let currentData = [];
       
       // Helper functions
       function formatDate(dateStr) {
@@ -198,6 +260,8 @@
       
       // Function to create the heatmap
       function renderHeatmap(data) {
+        currentData = data;
+        
         const heatmapContainer = document.getElementById('heatmap');
         const tooltipElement = document.getElementById('tooltip');
         const monthLabelsContainer = document.getElementById('month-labels');
@@ -222,6 +286,8 @@
         let totalCommands = 0;
         let activeDays = 0;
         let bestDay = { date: '', count: 0 };
+        let totalSuccess = 0;
+        let totalFailure = 0;
         
         // Track month changes for labels
         let currentMonth = -1;
@@ -256,10 +322,21 @@
             
             // Find if we have data for this date
             let count = 0;
+            let success = 0;
+            let failure = 0;
+            let successRate = 100;
+            
             const dataItem = data.find(item => item.date === dateStr);
             if (dataItem) {
-              count = dataItem.count;
+              count = dataItem.count || 0;
+              success = dataItem.success || 0;
+              failure = dataItem.failure || 0;
+              successRate = dataItem.successRate || 100;
+              
               totalCommands += count;
+              totalSuccess += success;
+              totalFailure += failure;
+              
               if (count > bestDay.count) {
                 bestDay = { date: dateStr, count: count };
               }
@@ -269,6 +346,8 @@
             // Create the day element
             const dayElement = document.createElement('div');
             dayElement.className = 'day';
+            dayElement.id = `day-${dateStr}`;
+            dayElement.setAttribute('data-date', dateStr);
             dayElement.style.gridRowStart = dayOfWeek + 1;
             dayElement.style.gridColumnStart = week + 1;
             dayElement.style.backgroundColor = getColorForCount(count);
@@ -277,10 +356,12 @@
             dayElement.addEventListener('mouseover', (e) => {
               const rect = e.target.getBoundingClientRect();
               tooltipElement.style.left = `${rect.left + window.scrollX - 80}px`;
-              tooltipElement.style.top = `${rect.top + window.scrollY - 60}px`;
+              tooltipElement.style.top = `${rect.top + window.scrollY - 70}px`;
               tooltipElement.innerHTML = `
                 <div>${formatDate(dateStr)}</div>
                 <div><strong>${count} commands</strong></div>
+                <div>${success} successful (${successRate}%)</div>
+                <div>${failure} failed</div>
               `;
               tooltipElement.style.opacity = '1';
             });
@@ -298,6 +379,76 @@
         document.getElementById('active-days').textContent = activeDays;
         document.getElementById('best-day-count').textContent = bestDay.count > 0 ? bestDay.count : 0;
         document.getElementById('avg-commands').textContent = (activeDays > 0 ? (totalCommands / activeDays).toFixed(1) : '0');
+        document.getElementById('success-count').textContent = totalSuccess;
+        document.getElementById('failure-count').textContent = totalFailure;
+        
+        // Update success rate bar
+        const overallSuccessRate = totalCommands > 0 ? 
+          Math.round((totalSuccess / totalCommands) * 100) : 100;
+        
+        const successRateFill = document.getElementById('success-rate-fill');
+        const successRateText = document.getElementById('success-rate-text');
+        
+        successRateFill.style.width = `${overallSuccessRate}%`;
+        successRateText.textContent = `${overallSuccessRate}%`;
+      }
+      
+      // Function to update heatmap with new data
+      function updateHeatmap(data) {
+        // Store the current data
+        currentData = data;
+        
+        let totalCommands = 0;
+        let activeDays = 0;
+        let bestDay = { date: '', count: 0 };
+        let totalSuccess = 0;
+        let totalFailure = 0;
+        
+        // Process data and update statistics
+        data.forEach(item => {
+          const count = item.count || 0;
+          const success = item.success || 0;
+          const failure = item.failure || 0;
+          
+          totalCommands += count;
+          totalSuccess += success;
+          totalFailure += failure;
+          
+          if (count > bestDay.count) {
+            bestDay = { date: item.date, count: count };
+          }
+          
+          if (count > 0) activeDays++;
+          
+          // Update day element if it exists
+          const dayElement = document.getElementById(`day-${item.date}`);
+          if (dayElement) {
+            dayElement.style.backgroundColor = getColorForCount(count);
+            
+            // Add animation for real-time updates
+            dayElement.classList.remove('updated');
+            void dayElement.offsetWidth; // Force reflow
+            dayElement.classList.add('updated');
+          }
+        });
+        
+        // Update statistics
+        document.getElementById('total-commands').textContent = totalCommands;
+        document.getElementById('active-days').textContent = activeDays;
+        document.getElementById('best-day-count').textContent = bestDay.count > 0 ? bestDay.count : 0;
+        document.getElementById('avg-commands').textContent = (activeDays > 0 ? (totalCommands / activeDays).toFixed(1) : '0');
+        document.getElementById('success-count').textContent = totalSuccess;
+        document.getElementById('failure-count').textContent = totalFailure;
+        
+        // Update success rate bar
+        const overallSuccessRate = totalCommands > 0 ? 
+          Math.round((totalSuccess / totalCommands) * 100) : 100;
+        
+        const successRateFill = document.getElementById('success-rate-fill');
+        const successRateText = document.getElementById('success-rate-text');
+        
+        successRateFill.style.width = `${overallSuccessRate}%`;
+        successRateText.textContent = `${overallSuccessRate}%`;
       }
       
       // Load the data
@@ -317,6 +468,9 @@
         switch (message.command) {
           case 'dataLoaded':
             renderHeatmap(message.data);
+            break;
+          case 'dataUpdated':
+            updateHeatmap(message.data);
             break;
           case 'homeDir':
             // Store home directory if needed

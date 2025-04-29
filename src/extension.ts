@@ -75,7 +75,13 @@ export function activate(context: vscode.ExtensionContext) {
     
     // Process any command files more frequently (every 3 seconds)
     setInterval(() => {
-        processCommandFiles(statusBarItem);
+        let dataChanged = processCommandFiles(statusBarItem);
+        
+        // If data changed and webview is open, update it real-time
+        if (dataChanged && currentPanel) {
+            generateHeatmapData();
+            updateHeatmapWebviewRealtime();
+        }
     }, 3000);
 }
 
@@ -89,7 +95,8 @@ mkdir -p "${DATA_DIR}"
 
 # Simple tracking function that logs a timestamp when Enter is pressed
 log_vscode_cmd() {
-    echo "$(date +"%Y-%m-%dT%H:%M:%S%z")" >> "${CMD_FILE}"
+    local exit_status=$?
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|$exit_status" >> "${CMD_FILE}"
 }
 
 # Handle different shells
@@ -105,7 +112,7 @@ if [ -n "$ZSH_VERSION" ]; then
     # Check if it's already in precmd_functions
     if ! typeset -f precmd > /dev/null; then
         # Add a test entry to confirm setup
-        echo "$(date +"%Y-%m-%dT%H:%M:%S%z") ZSH-SETUP" >> "${CMD_FILE}"
+        echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|0 ZSH-SETUP" >> "${CMD_FILE}"
     fi
     
 elif [ -n "$BASH_VERSION" ]; then
@@ -120,7 +127,7 @@ elif [ -n "$BASH_VERSION" ]; then
     fi
     
     # Add a test entry to confirm setup
-    echo "$(date +"%Y-%m-%dT%H:%M:%S%z") BASH-SETUP" >> "${CMD_FILE}"
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|0 BASH-SETUP" >> "${CMD_FILE}"
     
 else
     # Generic fallback
@@ -130,7 +137,7 @@ else
     export PROMPT_COMMAND="log_vscode_cmd"
     
     # Add a test entry to confirm setup
-    echo "$(date +"%Y-%m-%dT%H:%M:%S%z") GENERIC-SETUP" >> "${CMD_FILE}"
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|0 GENERIC-SETUP" >> "${CMD_FILE}"
 fi
 
 echo "Terminal tracker activated"
@@ -229,8 +236,29 @@ function showHeatmapWebview(context: vscode.ExtensionContext) {
     }
 }
 
+// Update webview in real-time with new data
+function updateHeatmapWebviewRealtime() {
+    try {
+        if (!currentPanel) return;
+        
+        // Load the latest data
+        if (fs.existsSync(DATA_FILE)) {
+            const dataContent = fs.readFileSync(DATA_FILE, 'utf8');
+            const data = JSON.parse(dataContent);
+            
+            // Send updated data to the webview
+            currentPanel.webview.postMessage({
+                command: 'dataUpdated',
+                data: data
+            });
+        }
+    } catch (error) {
+        console.error('Error updating heatmap webview:', error);
+    }
+}
+
 // Log a command to the log file
-function logCommand(timestamp: string, source: string, action: string) {
+function logCommand(timestamp: string, source: string, action: string, exitStatus: string = '0') {
     try {
         // Ensure LOG_FILE directory exists
         if (!fs.existsSync(path.dirname(LOG_FILE))) {
@@ -256,9 +284,9 @@ function logCommand(timestamp: string, source: string, action: string) {
         // Append to log file
         fs.appendFileSync(
             LOG_FILE,
-            `${adjustedTimestamp}\t${source}\t${action}\n`
+            `${adjustedTimestamp}\t${source}\t${action}\texit=${exitStatus}\n`
         );
-        console.log(`Logged command: ${adjustedTimestamp} ${source} ${action}`);
+        console.log(`Logged command: ${adjustedTimestamp} ${source} ${action} exit=${exitStatus}`);
     } catch (error) {
         console.error('Error logging command:', error);
     }
@@ -275,8 +303,10 @@ function generateHeatmapData() {
         const logData = fs.readFileSync(LOG_FILE, 'utf8');
         const lines = logData.trim().split('\n');
         
-        // Map to store command counts by date
+        // Maps to store command counts by date
         const dateMap: {[key: string]: number} = {};
+        const successMap: {[key: string]: number} = {};
+        const failureMap: {[key: string]: number} = {};
         
         // Process each log entry
         lines.forEach(line => {
@@ -295,13 +325,31 @@ function generateHeatmapData() {
                 
                 // Use the adjusted date for counting
                 dateMap[adjustedDate] = (dateMap[adjustedDate] || 0) + 1;
+                
+                // Check exit status if available
+                const exitStatusMatch = line.match(/exit=(\d+)/);
+                if (exitStatusMatch) {
+                    const exitStatus = exitStatusMatch[1];
+                    if (exitStatus === '0') {
+                        // Success
+                        successMap[adjustedDate] = (successMap[adjustedDate] || 0) + 1;
+                    } else {
+                        // Failure
+                        failureMap[adjustedDate] = (failureMap[adjustedDate] || 0) + 1;
+                    }
+                }
             }
         });
         
         // Convert to array format for visualization
         const heatmapData = Object.keys(dateMap).map(date => ({
             date,
-            count: dateMap[date]
+            count: dateMap[date],
+            success: successMap[date] || 0,
+            failure: failureMap[date] || 0,
+            successRate: successMap[date] ? 
+                Math.round((successMap[date] / (successMap[date] + (failureMap[date] || 0))) * 100) : 
+                100
         }));
         
         // Sort by date
@@ -334,15 +382,11 @@ function updateStatusBar(statusBar: vscode.StatusBarItem) {
             String(now.getMonth() + 1).padStart(2, '0') + '-' + 
             String(now.getDate()).padStart(2, '0');
         
-        /* Get tomorrow's date to compare with adjusted logs
-        const tomorrow = new Date(now);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const tomorrowStr = tomorrow.getFullYear() + '-' + 
-            String(tomorrow.getMonth() + 1).padStart(2, '0') + '-' + 
-            String(tomorrow.getDate()).padStart(2, '0');*/
-        
-        // Count today's commands
+        // Count today's commands and success/failure
         let todayCount = 0;
+        let todaySuccessCount = 0;
+        let todayFailureCount = 0;
+        
         lines.forEach(line => {
             const parts = line.split('\t');
             if (parts.length >= 1) {
@@ -352,11 +396,25 @@ function updateStatusBar(statusBar: vscode.StatusBarItem) {
                 // Check if this log corresponds to today
                 if (logDate === today) {
                     todayCount++;
+                    
+                    // Check exit status
+                    const exitStatusMatch = line.match(/exit=(\d+)/);
+                    if (exitStatusMatch) {
+                        if (exitStatusMatch[1] === '0') {
+                            todaySuccessCount++;
+                        } else {
+                            todayFailureCount++;
+                        }
+                    }
                 }
             }
         });
         
-        statusBar.text = `${STATUS_BAR_TITLE} (${todayCount} today)`;
+        // Calculate success rate
+        const successRate = todayCount > 0 ? 
+            Math.round((todaySuccessCount / todayCount) * 100) : 100;
+        
+        statusBar.text = `${STATUS_BAR_TITLE} (${todayCount} today, ${successRate}% success)`;
         
     } catch (error) {
         console.error('Error updating command count:', error);
@@ -364,12 +422,13 @@ function updateStatusBar(statusBar: vscode.StatusBarItem) {
 }
 
 // Process command files created by terminal tracking
-function processCommandFiles(statusBar: vscode.StatusBarItem) {
+// Returns true if new commands were processed
+function processCommandFiles(statusBar: vscode.StatusBarItem): boolean {
     if (fs.existsSync(CMD_FILE)) {
         try {
             const content = fs.readFileSync(CMD_FILE, 'utf8');
             if (!content.trim()) {
-                return; // Skip empty files
+                return false; // Skip empty files
             }
             
             console.log(`Processing cmd file with ${content.trim().split('\n').length} entries`);
@@ -382,21 +441,34 @@ function processCommandFiles(statusBar: vscode.StatusBarItem) {
                 // Be more lenient with timestamp format
                 let timestamp = line.trim();
                 let parts;
+                let exitStatus = '0'; // Default to success
                 
-                // Check if this is a setup confirmation with space
-                if (timestamp.includes(' SETUP')) {
-                    parts = timestamp.split(' ');
-                    logCommand(parts[0], 'setup', parts[1] || 'initialization');
-                    processedCount++;
+                // Extract exit status if present
+                if (timestamp.includes('|')) {
+                    parts = timestamp.split('|');
+                    timestamp = parts[0];
+                    exitStatus = parts[1];
+                    
+                    // If there's a space after the exit status (for setup logs)
+                    if (exitStatus.includes(' ')) {
+                        const setupParts = exitStatus.split(' ');
+                        exitStatus = setupParts[0];
+                        const setupType = setupParts[1] || 'initialization';
+                        
+                        logCommand(timestamp, 'setup', setupType, exitStatus);
+                        processedCount++;
+                        return; // Skip further processing for setup entries
+                    }
                 }
+                
                 // Check if it matches ISO format with Z (UTC)
-                else if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)) {
-                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
+                if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/)) {
+                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed', exitStatus);
                     processedCount++;
                 }
                 // Check if it matches ISO format with timezone offset (+/-NNNN)
                 else if (timestamp.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{4}$/)) {
-                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed');
+                    logCommand(timestamp, 'prompt-tracking', 'enter-pressed', exitStatus);
                     processedCount++;
                 }
                 // Also accept other date formats that just have the date portion
@@ -411,7 +483,7 @@ function processCommandFiles(statusBar: vscode.StatusBarItem) {
                     const offsetSign = timezoneOffset <= 0 ? '+' : '-';
                     const fullTimestamp = `${datePart}T${timeString}${offsetSign}${offsetHours}${offsetMinutes}`;
                     
-                    logCommand(fullTimestamp, 'prompt-tracking', 'enter-pressed');
+                    logCommand(fullTimestamp, 'prompt-tracking', 'enter-pressed', exitStatus);
                     processedCount++;
                 }
             });
@@ -424,11 +496,15 @@ function processCommandFiles(statusBar: vscode.StatusBarItem) {
             // Update status bar
             updateStatusBar(statusBar);
             
+            return processedCount > 0;
+            
         } catch (error) {
             console.error('Error processing command file:', error);
+            return false;
         }
     } else {
         console.log(`Command file doesn't exist at: ${CMD_FILE}`);
+        return false;
     }
 }
 
