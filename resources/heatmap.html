@@ -167,6 +167,11 @@
     .day.updated {
       animation: pulse 0.5s ease;
     }
+    
+    .today-indicator {
+      font-weight: bold;
+      color: var(--vscode-textLink-activeForeground);
+    }
   </style>
 </head>
 <body>
@@ -190,7 +195,7 @@
     </div>
     
     <div class="success-rate-container">
-      <h3>Command Success Rate</h3>
+      <h3>Today's Command Success Rate</h3>
       <div class="success-rate-bar">
         <div id="success-rate-fill" class="success-rate-fill" style="width: 100%;"></div>
         <div id="success-rate-text" class="success-rate-text">100%</div>
@@ -213,14 +218,6 @@
           <div class="stat-label">Most Active Day</div>
         </div>
         <div class="stat-item">
-          <div class="stat-value" id="avg-commands">0</div>
-          <div class="stat-label">Daily Average</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-value" id="success-count">0</div>
-          <div class="stat-label">Successful Commands</div>
-        </div>
-        <div class="stat-item">
           <div class="stat-value" id="failure-count">0</div>
           <div class="stat-label">Failed Commands</div>
         </div>
@@ -237,6 +234,13 @@
       
       // Track our current data
       let currentData = [];
+      let todayStats = {
+        total: 0,
+        success: 0,
+        failure: 0,
+        successRate: 100,
+        date: getCurrentDateString()
+      };
       
       // Helper functions
       function formatDate(dateStr) {
@@ -250,12 +254,46 @@
         });
       }
       
+      function getCurrentDateString() {
+        const now = new Date();
+        return now.getFullYear() + '-' + 
+            String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(now.getDate()).padStart(2, '0');
+      }
+      
       function getColorForCount(count) {
         if (count === 0) return 'var(--vscode-editor-background)';
         if (count < 10) return '#0e4429';
         if (count < 20) return '#006d32';
         if (count < 50) return '#26a641';
         return '#39d353';
+      }
+      
+      // Function to update tooltip for today's date
+      function updateTodayTooltip() {
+        const todayElement = document.getElementById(`day-${todayStats.date}`);
+        if (todayElement) {
+          // Update the dataset for the tooltip access
+          todayElement.dataset.count = todayStats.total;
+          todayElement.dataset.success = todayStats.success;
+          todayElement.dataset.failure = todayStats.failure;
+          todayElement.dataset.successRate = todayStats.successRate;
+          
+          // Add a visual indicator to highlight today
+          todayElement.classList.add('today-indicator');
+          
+          // Update the background color
+          todayElement.style.backgroundColor = getColorForCount(todayStats.total);
+        }
+      }
+      
+      // Function to update success rate display
+      function updateSuccessRateDisplay() {
+        const successRateFill = document.getElementById('success-rate-fill');
+        const successRateText = document.getElementById('success-rate-text');
+        
+        successRateFill.style.width = `${todayStats.successRate}%`;
+        successRateText.textContent = `${todayStats.successRate}% Today`;
       }
       
       // Function to create the heatmap
@@ -286,7 +324,6 @@
         let totalCommands = 0;
         let activeDays = 0;
         let bestDay = { date: '', count: 0 };
-        let totalSuccess = 0;
         let totalFailure = 0;
         
         // Track month changes for labels
@@ -334,13 +371,20 @@
               successRate = dataItem.successRate || 100;
               
               totalCommands += count;
-              totalSuccess += success;
               totalFailure += failure;
               
               if (count > bestDay.count) {
                 bestDay = { date: dateStr, count: count };
               }
               if (count > 0) activeDays++;
+              
+              // If this is today, update today's stats
+              if (dateStr === todayStats.date) {
+                todayStats.total = count;
+                todayStats.success = success;
+                todayStats.failure = failure;
+                todayStats.successRate = successRate;
+              }
             }
             
             // Create the day element
@@ -348,20 +392,38 @@
             dayElement.className = 'day';
             dayElement.id = `day-${dateStr}`;
             dayElement.setAttribute('data-date', dateStr);
+            dayElement.setAttribute('data-count', count);
+            dayElement.setAttribute('data-success', success);
+            dayElement.setAttribute('data-failure', failure);
+            dayElement.setAttribute('data-success-rate', successRate);
+            
             dayElement.style.gridRowStart = dayOfWeek + 1;
             dayElement.style.gridColumnStart = week + 1;
             dayElement.style.backgroundColor = getColorForCount(count);
+            
+            // Mark today's date
+            if (dateStr === todayStats.date) {
+              dayElement.classList.add('today-indicator');
+            }
             
             // Add tooltip
             dayElement.addEventListener('mouseover', (e) => {
               const rect = e.target.getBoundingClientRect();
               tooltipElement.style.left = `${rect.left + window.scrollX - 80}px`;
               tooltipElement.style.top = `${rect.top + window.scrollY - 70}px`;
+              
+              // Get the actual data from the dataset
+              const itemCount = parseInt(e.target.dataset.count || '0');
+              const itemFailure = parseInt(e.target.dataset.failure || '0');
+              const itemSuccessRate = parseInt(e.target.dataset.successRate || '100');
+              
+              const isToday = e.target.dataset.date === todayStats.date;
+              
               tooltipElement.innerHTML = `
-                <div>${formatDate(dateStr)}</div>
-                <div><strong>${count} commands</strong></div>
-                <div>${success} successful (${successRate}%)</div>
-                <div>${failure} failed</div>
+                <div>${formatDate(e.target.dataset.date)}</div>
+                <div><strong>${itemCount} commands</strong></div>
+                <div>${itemFailure} failed (${100 - itemSuccessRate}% failure rate)</div>
+                ${isToday ? '<div><strong>Today</strong></div>' : ''}
               `;
               tooltipElement.style.opacity = '1';
             });
@@ -378,19 +440,10 @@
         document.getElementById('total-commands').textContent = totalCommands;
         document.getElementById('active-days').textContent = activeDays;
         document.getElementById('best-day-count').textContent = bestDay.count > 0 ? bestDay.count : 0;
-        document.getElementById('avg-commands').textContent = (activeDays > 0 ? (totalCommands / activeDays).toFixed(1) : '0');
-        document.getElementById('success-count').textContent = totalSuccess;
         document.getElementById('failure-count').textContent = totalFailure;
         
-        // Update success rate bar
-        const overallSuccessRate = totalCommands > 0 ? 
-          Math.round((totalSuccess / totalCommands) * 100) : 100;
-        
-        const successRateFill = document.getElementById('success-rate-fill');
-        const successRateText = document.getElementById('success-rate-text');
-        
-        successRateFill.style.width = `${overallSuccessRate}%`;
-        successRateText.textContent = `${overallSuccessRate}%`;
+        // Update success rate bar with today's data
+        updateSuccessRateDisplay();
       }
       
       // Function to update heatmap with new data
@@ -401,17 +454,14 @@
         let totalCommands = 0;
         let activeDays = 0;
         let bestDay = { date: '', count: 0 };
-        let totalSuccess = 0;
         let totalFailure = 0;
         
         // Process data and update statistics
         data.forEach(item => {
           const count = item.count || 0;
-          const success = item.success || 0;
           const failure = item.failure || 0;
           
           totalCommands += count;
-          totalSuccess += success;
           totalFailure += failure;
           
           if (count > bestDay.count) {
@@ -425,6 +475,12 @@
           if (dayElement) {
             dayElement.style.backgroundColor = getColorForCount(count);
             
+            // Update the dataset attributes for tooltip
+            dayElement.dataset.count = count;
+            dayElement.dataset.success = item.success || 0;
+            dayElement.dataset.failure = failure;
+            dayElement.dataset.successRate = item.successRate || 100;
+            
             // Add animation for real-time updates
             dayElement.classList.remove('updated');
             void dayElement.offsetWidth; // Force reflow
@@ -436,19 +492,14 @@
         document.getElementById('total-commands').textContent = totalCommands;
         document.getElementById('active-days').textContent = activeDays;
         document.getElementById('best-day-count').textContent = bestDay.count > 0 ? bestDay.count : 0;
-        document.getElementById('avg-commands').textContent = (activeDays > 0 ? (totalCommands / activeDays).toFixed(1) : '0');
-        document.getElementById('success-count').textContent = totalSuccess;
         document.getElementById('failure-count').textContent = totalFailure;
-        
-        // Update success rate bar
-        const overallSuccessRate = totalCommands > 0 ? 
-          Math.round((totalSuccess / totalCommands) * 100) : 100;
-        
-        const successRateFill = document.getElementById('success-rate-fill');
-        const successRateText = document.getElementById('success-rate-text');
-        
-        successRateFill.style.width = `${overallSuccessRate}%`;
-        successRateText.textContent = `${overallSuccessRate}%`;
+      }
+      
+      // Function to update today's statistics
+      function updateTodayStatistics(stats) {
+        todayStats = stats;
+        updateTodayTooltip();
+        updateSuccessRateDisplay();
       }
       
       // Load the data
@@ -471,6 +522,9 @@
             break;
           case 'dataUpdated':
             updateHeatmap(message.data);
+            break;
+          case 'todayStats':
+            updateTodayStatistics(message.data);
             break;
           case 'homeDir':
             // Store home directory if needed

@@ -199,6 +199,13 @@ function showHeatmapWebview(context: vscode.ExtensionContext) {
                             command: 'dataLoaded', 
                             data: data 
                         });
+                        
+                        // Also send today's statistics
+                        const todayStats = getTodayStatistics();
+                        currentPanel?.webview.postMessage({
+                            command: 'todayStats',
+                            data: todayStats
+                        });
                     } catch (error) {
                         console.error('Error loading data:', error);
                         // Send empty data as fallback
@@ -236,6 +243,78 @@ function showHeatmapWebview(context: vscode.ExtensionContext) {
     }
 }
 
+// Get today's command statistics
+function getTodayStatistics() {
+    try {
+        if (!fs.existsSync(LOG_FILE)) {
+            return {
+                total: 0,
+                success: 0,
+                failure: 0,
+                successRate: 100
+            };
+        }
+        
+        const logData = fs.readFileSync(LOG_FILE, 'utf8');
+        const lines = logData.trim().split('\n');
+        
+        // Get today's date in local timezone
+        const now = new Date();
+        const today = now.getFullYear() + '-' + 
+            String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+            String(now.getDate()).padStart(2, '0');
+        
+        // Count today's commands and success/failure
+        let todayCount = 0;
+        let todaySuccessCount = 0;
+        let todayFailureCount = 0;
+        
+        lines.forEach(line => {
+            const parts = line.split('\t');
+            if (parts.length >= 1) {
+                // Extract date from timestamp (YYYY-MM-DD)
+                const logDate = parts[0].substring(0, 10);
+                
+                // Check if this log corresponds to today
+                if (logDate === today) {
+                    todayCount++;
+                    
+                    // Check exit status
+                    const exitStatusMatch = line.match(/exit=(\d+)/);
+                    if (exitStatusMatch) {
+                        if (exitStatusMatch[1] === '0') {
+                            todaySuccessCount++;
+                        } else {
+                            todayFailureCount++;
+                        }
+                    }
+                }
+            }
+        });
+        
+        // Calculate success rate
+        const successRate = todayCount > 0 ? 
+            Math.round((todaySuccessCount / todayCount) * 100) : 100;
+        
+        return {
+            total: todayCount,
+            success: todaySuccessCount,
+            failure: todayFailureCount,
+            successRate: successRate,
+            date: today
+        };
+        
+    } catch (error) {
+        console.error('Error getting today statistics:', error);
+        return {
+            total: 0,
+            success: 0,
+            failure: 0,
+            successRate: 100
+        };
+    }
+}
+
 // Update webview in real-time with new data
 function updateHeatmapWebviewRealtime() {
     try {
@@ -250,6 +329,13 @@ function updateHeatmapWebviewRealtime() {
             currentPanel.webview.postMessage({
                 command: 'dataUpdated',
                 data: data
+            });
+            
+            // Also send today's updated statistics
+            const todayStats = getTodayStatistics();
+            currentPanel.webview.postMessage({
+                command: 'todayStats',
+                data: todayStats
             });
         }
     } catch (error) {
@@ -368,56 +454,13 @@ function generateHeatmapData() {
 // Update status bar with today's count
 function updateStatusBar(statusBar: vscode.StatusBarItem) {
     try {
-        if (!fs.existsSync(LOG_FILE)) {
-            statusBar.text = STATUS_BAR_TITLE + ' (0)';
-            return;
-        }
+        const todayStats = getTodayStatistics();
         
-        const logData = fs.readFileSync(LOG_FILE, 'utf8');
-        const lines = logData.trim().split('\n');
-        
-        // Get today's date in local timezone
-        const now = new Date();
-        const today = now.getFullYear() + '-' + 
-            String(now.getMonth() + 1).padStart(2, '0') + '-' + 
-            String(now.getDate()).padStart(2, '0');
-        
-        // Count today's commands and success/failure
-        let todayCount = 0;
-        let todaySuccessCount = 0;
-        let todayFailureCount = 0;
-        
-        lines.forEach(line => {
-            const parts = line.split('\t');
-            if (parts.length >= 1) {
-                // Extract date from timestamp (YYYY-MM-DD)
-                const logDate = parts[0].substring(0, 10);
-                
-                // Check if this log corresponds to today
-                if (logDate === today) {
-                    todayCount++;
-                    
-                    // Check exit status
-                    const exitStatusMatch = line.match(/exit=(\d+)/);
-                    if (exitStatusMatch) {
-                        if (exitStatusMatch[1] === '0') {
-                            todaySuccessCount++;
-                        } else {
-                            todayFailureCount++;
-                        }
-                    }
-                }
-            }
-        });
-        
-        // Calculate success rate
-        const successRate = todayCount > 0 ? 
-            Math.round((todaySuccessCount / todayCount) * 100) : 100;
-        
-        statusBar.text = `${STATUS_BAR_TITLE} (${todayCount} today, ${successRate}% success)`;
-        
+        // Format the status bar text with today's count and success rate
+        statusBar.text = `${STATUS_BAR_TITLE} (${todayStats.total} today, ${todayStats.successRate}% success)`;
     } catch (error) {
         console.error('Error updating command count:', error);
+        statusBar.text = STATUS_BAR_TITLE + ' (0)';
     }
 }
 
