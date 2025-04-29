@@ -93,50 +93,78 @@ function createSetupScript() {
 # Create directory if needed
 mkdir -p "${DATA_DIR}"
 
-# Simple tracking function that logs a timestamp when Enter is pressed
-log_vscode_cmd() {
-    local exit_status=$?
-    echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|$exit_status" >> "${CMD_FILE}"
-}
-
-# Handle different shells
+# For Zsh - use precmd hook to capture previous command status
 if [ -n "$ZSH_VERSION" ]; then
-    # For Zsh
-    echo "Setting up for Zsh shell" >> "${DATA_DIR}/setup.log"
+    # Store the exit code before it gets reset
+    precmd_functions+=(_vscode_track_cmd)
     
-    # Define the precmd function for Zsh
-    precmd() {
-        log_vscode_cmd
+    _vscode_track_cmd() {
+        local code=$?
+        # Only log non-empty commands (avoiding initialization entries)
+        if [ -n "$VSCODE_LAST_CMD" ]; then
+            echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|$code" >> "${CMD_FILE}"
+        fi
+        # This gets set by preexec
+        VSCODE_LAST_CMD=""
     }
     
-    # Check if it's already in precmd_functions
-    if ! typeset -f precmd > /dev/null; then
-        # Add a test entry to confirm setup
-        echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|0 ZSH-SETUP" >> "${CMD_FILE}"
-    fi
+    # Track when commands are entered using preexec
+    preexec_functions+=(_vscode_cmd_preexec)
     
+    _vscode_cmd_preexec() {
+        VSCODE_LAST_CMD="$1"
+    }
+    
+    # Add a test entry
+    echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|0 ZSH-SETUP" >> "${CMD_FILE}"
+    
+# For Bash - use PROMPT_COMMAND to capture previous command status
 elif [ -n "$BASH_VERSION" ]; then
-    # For Bash
-    echo "Setting up for Bash shell" >> "${DATA_DIR}/setup.log"
+    # Initialize variables
+    export VSCODE_LAST_EXIT_CODE=0
+    export VSCODE_LAST_CMD=""
     
-    # Add to PROMPT_COMMAND for Bash
+    # Function to run before command execution
+    _vscode_cmd_preexec() {
+        VSCODE_LAST_CMD="$BASH_COMMAND"
+    }
+    
+    # Set up trap to run before command execution
+    trap '_vscode_cmd_preexec' DEBUG
+    
+    # Function to track commands after execution
+    _vscode_track_cmd() {
+        # Store the exit code first thing
+        VSCODE_LAST_EXIT_CODE=$?
+        
+        # Only log for non-empty commands and not for our own function
+        if [ -n "$VSCODE_LAST_CMD" ] && [[ "$VSCODE_LAST_CMD" != _vscode_* ]]; then
+            echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|$VSCODE_LAST_EXIT_CODE" >> "${CMD_FILE}"
+            VSCODE_LAST_CMD=""
+        fi
+    }
+    
+    # Add to the beginning of PROMPT_COMMAND to ensure it runs first
     if [ -z "$PROMPT_COMMAND" ]; then
-        export PROMPT_COMMAND="log_vscode_cmd"
+        export PROMPT_COMMAND="_vscode_track_cmd"
     else
-        export PROMPT_COMMAND="log_vscode_cmd;$PROMPT_COMMAND"
+        export PROMPT_COMMAND="_vscode_track_cmd;$PROMPT_COMMAND"
     fi
     
-    # Add a test entry to confirm setup
+    # Add a test entry
     echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|0 BASH-SETUP" >> "${CMD_FILE}"
     
+# Generic fallback
 else
-    # Generic fallback
-    echo "Setting up for generic shell" >> "${DATA_DIR}/setup.log"
+    # For other shells, use a simpler approach that might be less reliable
+    log_vscode_cmd() {
+        echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|$?" >> "${CMD_FILE}"
+    }
     
     # Try setting PROMPT_COMMAND as a fallback
     export PROMPT_COMMAND="log_vscode_cmd"
     
-    # Add a test entry to confirm setup
+    # Add a test entry
     echo "$(date +"%Y-%m-%dT%H:%M:%S%z")|0 GENERIC-SETUP" >> "${CMD_FILE}"
 fi
 
