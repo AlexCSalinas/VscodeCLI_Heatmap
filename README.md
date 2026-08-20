@@ -2,6 +2,8 @@
 
 Track and visualize your terminal usage in VSCode with a GitHub-style contribution graph.
 
+I MADE THIS BC (BEFORE CLAUDE) So terminal tracking looks a lot different now (writing this august 2026)
+
 ![example](src/images/example.png)
 ## Overview
 
